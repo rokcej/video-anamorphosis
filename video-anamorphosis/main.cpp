@@ -173,7 +173,7 @@ void initOpenGL() {
 		glm::vec3(0.0f, 0.0f, -1.0f),
 		glm::vec3(0.0f, 1.0f, 0.0f)
 	);
-	projMat = glm::perspective(glm::radians(70.0f), (float)WIDTH / (float)HEIGHT, 0.1f, 1000.0f);
+	projMat = glm::perspective(glm::radians(60.0f), (float)WIDTH / (float)HEIGHT, 0.1f, 1000.0f);
 	pvmMat = projMat * viewMat;
 
 	// VAOs and VBOs
