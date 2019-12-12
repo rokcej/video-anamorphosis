@@ -26,7 +26,7 @@ void bmpSaveImage(float* data, int width, int height, const char* fileName) {
 	FILE* f = fopen(fileName, "wb");
 	fwrite(fileHeader, 1, FILE_HEADER_SIZE, f);
 	fwrite(infoHeader, 1, INFO_HEADER_SIZE, f);
-	for (int y = 0; y < height; ++y) {
+	for (int y = height - 1; y >= 0; --y) {
 		for (int x = 0; x < width; ++x) {
 			int i = (y * width + x) * 3;
 			unsigned char r = (unsigned char)round(data[i] * 255.0);

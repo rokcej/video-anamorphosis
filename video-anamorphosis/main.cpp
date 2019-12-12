@@ -5,6 +5,7 @@
 #include <Kinect.h>
 // Stdlib
 #include <iostream>
+#include <fstream>
 #include <stdint.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -33,7 +34,7 @@
 #define SAFE_RELEASE(ptr) { if (ptr) { (ptr)->Release(); (ptr) = nullptr; } }
 
 // GLFW variables
-GLFWwindow* window = nullptr;
+GLFWwindow *window = nullptr;
 
 // OpenGL variables
 GLuint prog; // Shader program
@@ -51,9 +52,11 @@ glm::vec3 pos, forward, up;
 
 
 // Kinect variables
-IKinectSensor* kinectSensor = nullptr; // Kinect sensor
-IDepthFrameReader* depthFrameReader = nullptr; // Kinect depth data reader
-uint16_t* depthBuffer = nullptr;
+IKinectSensor *kinectSensor = nullptr; // Kinect sensor
+IDepthFrameReader *depthFrameReader = nullptr; // Kinect depth data reader
+ICoordinateMapper *coordinateMapper = nullptr;
+uint16_t *depthBuffer = nullptr;
+CameraSpacePoint *pointBuffer = nullptr;
 float kinectFovy = 60.0f;
 float kinectFovx = 70.6f;
 
@@ -63,6 +66,8 @@ bool initKinect() {
 
 	if (!kinectSensor)
 		return false;
+
+	kinectSensor->get_CoordinateMapper(&coordinateMapper);
 
 	kinectSensor->Open();
 
@@ -76,12 +81,14 @@ bool initKinect() {
 	SAFE_RELEASE(depthFrameSource);
 
 	depthBuffer = new uint16_t[512 * 424];
+	pointBuffer = new CameraSpacePoint[512 * 424];
 
 	return true;
 }
 
 void cleanupKinect() {
 	delete[] depthBuffer;
+	delete[] pointBuffer;
 	SAFE_RELEASE(depthFrameReader);
 	SAFE_RELEASE(kinectSensor);
 }
@@ -102,6 +109,11 @@ void getKinectData() {
 		SAFE_RELEASE(depthFrame);
 		return;
 	}
+
+	coordinateMapper->MapDepthFrameToCameraSpace(
+		WIDTH * HEIGHT, depthBuffer,
+		WIDTH * HEIGHT, pointBuffer
+	);
 
 	SAFE_RELEASE(depthFrame);
 }
@@ -145,7 +157,7 @@ void initOpenGL() {
 }
 
 void getMesh() {
-	//vertices.clear();
+	vertices.clear();
 	float relWidth = 2.0f * tanf(kinectFovx * M_PI / 360.0f);
 	float relHeight = 2.0f * tanf(kinectFovy * M_PI / 360.0f);
 	glm::vec3** points = new glm::vec3*[HEIGHT];
@@ -153,15 +165,20 @@ void getMesh() {
 		points[y] = new glm::vec3[WIDTH];
 		for (int x = 0; x < WIDTH; ++x) {
 			int d = depthBuffer[y * WIDTH + x];
-			points[y][x] = (float)d * 0.001f * glm::normalize(glm::vec3(
+			/*points[y][x] = (float)d * 0.001f * glm::normalize(glm::vec3(
 				((float)x / (float)(WIDTH - 1) - 0.5f) * relWidth,
 				((float)y / (float)(HEIGHT - 1) - 0.5f) * relHeight,
 				-1.0f
-			));
+			));*/
+			points[y][x] = glm::vec3(
+				pointBuffer[y * WIDTH + x].X,
+				pointBuffer[y * WIDTH + x].Y,
+				pointBuffer[y * WIDTH + x].Z
+			);
 		}
 	}
-	for (int y = 0; y < HEIGHT - 1; ++y) {
-		for (int x = 0; x < WIDTH - 1; ++x) {
+	for (int y = 0.25 * HEIGHT; y < 0.75 * HEIGHT - 1; ++y) {
+		for (int x = 0.25 * HEIGHT; x < 0.75 * WIDTH - 1; ++x) {
 			int indices[] = { x,y, x,y+1, x+1,y+1, x,y, x+1,y+1, x+1,y };
 			for (int i = 0; i < 6; ++i) {
 				int ix = indices[2 * i];
@@ -172,7 +189,7 @@ void getMesh() {
 		}
 	}
 	// Free memory
-	for (int y = 0; y < HEIGHT - 1; ++y)
+	for (int y = 0; y < HEIGHT; ++y)
 		delete[] points[y];
 	delete[] points;
 }
@@ -224,9 +241,27 @@ int main() {
 	}
 
 	getKinectData();
+	std::cout << "GOTTEM" << std::endl;
 	saveDepthImage();
 	getMesh();
 	loadMesh();
+
+
+	std::ofstream file;
+	file.open("object.obj");
+	for (int i = 0; i < vertices.size() / 3; ++i) {
+		file << "v";
+		for (int j = 0; j < 3; ++j)
+			file << " " << vertices[3 * i + j];
+		file << std::endl;
+	}
+	for (int i = 0; i < vertices.size() / 3; ++i) {
+		file << "f";
+		for (int j = 1; j <= 3; ++j)
+			file << " " << 3 * i + j;
+		file << std::endl;
+	}
+	file.close();
 
 	// Main loop
 	auto startTimer = std::chrono::steady_clock::now();
