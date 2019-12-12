@@ -145,7 +145,7 @@ void initOpenGL() {
 }
 
 void getMesh() {
-	vertices.clear();
+	//vertices.clear();
 	float relWidth = 2.0f * tanf(kinectFovx * M_PI / 360.0f);
 	float relHeight = 2.0f * tanf(kinectFovy * M_PI / 360.0f);
 	glm::vec3** points = new glm::vec3*[HEIGHT];
@@ -233,7 +233,7 @@ int main() {
 	while (!glfwWindowShouldClose(window)) {
 		float seconds = std::chrono::duration<float>(std::chrono::steady_clock::now() - startTimer).count();
 
-		//update(seconds);
+		update(seconds);
 		draw();
 
 		glfwSwapBuffers(window);
