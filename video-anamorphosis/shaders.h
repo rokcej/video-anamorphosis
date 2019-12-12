@@ -5,18 +5,21 @@
 const char* vsSource = "\n\
 #version 450 core \n\
 layout (location = 0) in vec3 aPos; \n\
+layout (location = 1) in vec3 aColor; \n\
+out vec3 vColor; \n\
 uniform mat4 uPVM; \n\
-void main() {\n\
+void main() { \n\
 	gl_Position = uPVM * vec4(aPos, 1.0f); \n\
-	//gl_Position = vec4(aPos, 1.0); \n\
+	vColor = aColor; \n\
 } \n\
 ";
 
 const char* fsSource = "\n\
 #version 450 core \n\
+in vec3 vColor; \n\
 out vec4 oColor; \n\
 void main() { \n\
-	oColor = vec4(1.0f, 0.2f, 0.8f, 1.0f); \n\
+	oColor = vec4(vColor, 1.0f); \n\
 } \n\
 ";
 
