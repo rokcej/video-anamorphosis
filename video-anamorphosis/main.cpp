@@ -50,12 +50,17 @@ uint8_t rgbaBuf[CWIDTH * CHEIGHT * 4];
 ColorSpacePoint depth2rgb[DWIDTH * DHEIGHT];
 CameraSpacePoint depth2xyz[DWIDTH * DHEIGHT];
 
-// Interaction
+// Anamorphosis
+unsigned char *image = nullptr;
+int imageWidth, imageHeight;
+float projAngle = 45.0f;
+float projFovy = 45.0f;
 float radius = 1.5f;
-float angle = 0.0f;
-float speed = 0.005f;
+
+// Interaction
+float angle = 0.0f; // Rotation angle
+float speed = 0.5f; // Rotation speed
 bool anamorphosis = false;
-float projAngle = 80.0f;
 
 bool initKinect() {
 	if (FAILED(GetDefaultKinectSensor(&sensor)))
@@ -132,15 +137,42 @@ void getColorData(IMultiSourceFrame *frame, GLfloat *dest) {
 	SAFE_RELEASE(colorFrame);
 }
 
-glm::vec3 circlePos(float posAngle) {
-	return glm::vec3(radius * sinf(posAngle), 0.0f, -radius * (1.0f - cosf(posAngle)));
+glm::vec3 circlePos(float angleDeg) {
+	float angleRad = angleDeg * (float)M_PI / 180.0f;
+	return glm::vec3(radius * sinf(angleRad), 0.0f, -radius * (1.0f - cosf(angleRad)));
 }
 
 void getAnamorphicData(GLfloat* dest) {
 	glm::vec3 projPos = circlePos(projAngle);
+	glm::vec3 projTarget(0.0f, 0.0f, -radius);
+	glm::vec3 projDir = glm::normalize(projTarget - projPos);
+	glm::vec3 projUp(0.0f, 1.0f, 0.0f);
+	glm::vec3 projRight = glm::normalize(glm::cross(projDir, projUp)); // Should already be normal TODO REMOVE
+
+	float ratio = (float)imageWidth / (float)imageHeight;
+	float vMax = tanf(projFovy * (float)M_PI / 360.0f);
+	float uMax = vMax * ratio;
+
 	for (int i = 0; i < DWIDTH * DHEIGHT; ++i) {
-		CameraSpacePoint p = depth2xyz[i];
-		
+		CameraSpacePoint point = depth2xyz[i];
+		glm::vec3 rayDir = glm::vec3(point.X, point.Y, point.Z) - projPos;
+
+		float t = glm::dot(projDir, projDir) / glm::dot(projDir, rayDir);
+		glm::vec3 uv =  t * rayDir - projDir;
+		float u = glm::dot(uv, projRight);
+		float v = glm::dot(uv, -projUp);
+
+		int x = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(imageWidth-1));
+		int y = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(imageHeight-1));
+
+		if (x >= 0 && x < imageWidth && y >= 0 && y < imageHeight) {
+			int idx = (y * imageWidth + x) * 3;
+			for (int j = 0; j < 3; ++j)
+				*dest++ = (float)image[idx + j] / 255.0f;
+		} else {
+			for (int j = 0; j < 3; ++j)
+				*dest++ = 0.0f;
+		}
 	}
 }
 
@@ -179,6 +211,14 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 		case GLFW_KEY_SPACE: // Toggle
 			if (action == GLFW_PRESS)
 				anamorphosis = !anamorphosis;
+			break;
+		case GLFW_KEY_1: // Projector view
+			if (action == GLFW_PRESS)
+				angle = 0.0f;
+			break;
+		case GLFW_KEY_2: // Observer view
+			if (action == GLFW_PRESS)
+				angle = projAngle;
 			break;
 	}
 }
@@ -233,10 +273,16 @@ void initOpenGL() {
 void update(float dt) {
 	getKinectData();
 
+	// Rotation
 	int angleDir = 0;
-	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) angleDir -= 1;
-	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) angleDir += 1;
-	if (angleDir != 0) angle -= angleDir * speed;
+	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) angleDir += 1;
+	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) angleDir -= 1;
+	if (angleDir != 0) angle += angleDir * speed;
+
+	int fovDir = 0;
+	if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) fovDir += 1;
+	if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) fovDir -= 1;
+	if (fovDir != 0) projFovy += fovDir * speed;
 	
 	viewMat = glm::lookAt(
 		circlePos(angle),
@@ -260,7 +306,12 @@ void draw() {
 }
 
 void init() {
-	
+	int n;
+	image = stbi_load("image.jpg", &imageWidth, &imageHeight, &n, 3);
+}
+
+void cleanup() {
+	stbi_image_free(image);
 }
 
 int main() {
@@ -289,6 +340,7 @@ int main() {
 	}
 	glfwTerminate();
 	cleanupKinect();
+	cleanup();
 
 	return 0;
 }
