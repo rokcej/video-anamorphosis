@@ -53,7 +53,7 @@ CameraSpacePoint depth2xyz[DWIDTH * DHEIGHT];
 // Anamorphosis
 unsigned char *image = nullptr;
 int imageWidth, imageHeight;
-float projAngle = 45.0f;
+float projAngle = 0.0f;
 float projFovy = 45.0f;
 float radius = 1.5f;
 
@@ -171,7 +171,8 @@ void getAnamorphicData(GLfloat* dest) {
 				*dest++ = (float)image[idx + j] / 255.0f;
 		} else {
 			for (int j = 0; j < 3; ++j)
-				*dest++ = 0.0f;
+				*dest++ *= 0.25f;
+				//*dest++ = 0.0f;
 		}
 	}
 }
@@ -192,9 +193,9 @@ void getKinectData() {
 	
 	ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	if (ptr) {
-		if (!anamorphosis) // Map color to points
+		//if (!anamorphosis) // Map color to points
 			getColorData(frame, ptr);
-		else // Map anamorphic image to points
+		if (anamorphosis) // Map anamorphic image to points
 			getAnamorphicData(ptr);
 	}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
@@ -219,6 +220,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 		case GLFW_KEY_2: // Observer view
 			if (action == GLFW_PRESS)
 				angle = projAngle;
+			break;
+		case GLFW_KEY_ENTER: // Apply projection to current angle
+			if (action == GLFW_PRESS)
+				projAngle = angle;
 			break;
 	}
 }
@@ -301,7 +306,7 @@ void draw() {
 
 	glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
 
-	glPointSize((GLfloat)HEIGHT / (GLfloat)DHEIGHT);
+	glPointSize((GLfloat)HEIGHT / (GLfloat)DHEIGHT * 1.2f);
 	glDrawArrays(GL_POINTS, 0, DWIDTH * DHEIGHT * 3 * sizeof(GLfloat));
 }
 
