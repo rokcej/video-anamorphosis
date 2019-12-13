@@ -55,7 +55,7 @@ unsigned char *image = nullptr;
 int imageWidth, imageHeight;
 float projAngle = 0.0f;
 float projFovy = 45.0f;
-float radius = 1.0f;
+float radius = 1.0f; // Meters
 
 // Interaction
 float angle = 0.0f; // Rotation angle
