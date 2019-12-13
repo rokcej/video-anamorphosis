@@ -1,17 +1,16 @@
 #define _CRT_SECURE_NO_WARNINGS
+
 // Kinect
 #include <Windows.h>
 #include <Ole2.h>
 #include <Kinect.h>
 // Stdlib
 #include <iostream>
-#include <fstream>
 #include <stdint.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <chrono>
 #include <vector>
-#include <thread>
 // GLEW
 #include <GL/glew.h>
 // GLFW
@@ -36,10 +35,8 @@
 
 #define SAFE_RELEASE(ptr) { if (ptr) { (ptr)->Release(); (ptr) = nullptr; } }
 
-// GLFW variables
-GLFWwindow *window = nullptr;
-
 // OpenGL variables
+GLFWwindow* window = nullptr;
 GLuint prog; // Shader program
 GLuint vao, vboDepth, vboColor;
 glm::mat4 viewMat, projMat, pvmMat;
@@ -57,6 +54,8 @@ CameraSpacePoint depth2xyz[DWIDTH * DHEIGHT];
 float radius = 1.5f;
 float angle = 0.0f;
 float speed = 0.005f;
+bool anamorphosis = false;
+float projAngle = 80.0f;
 
 bool initKinect() {
 	if (FAILED(GetDefaultKinectSensor(&sensor)))
@@ -97,6 +96,7 @@ void getDepthData(IMultiSourceFrame  *frame, GLfloat *dest) {
 	mapper->MapDepthFrameToColorSpace(DWIDTH * DHEIGHT, buf, DWIDTH * DHEIGHT, depth2rgb);
 
 	for (unsigned int i = 0; i < sz; i++) {
+		depth2xyz[i].Z *= -1.f;
 		*dest++ = depth2xyz[i].X;
 		*dest++ = depth2xyz[i].Y;
 		*dest++ = depth2xyz[i].Z;
@@ -132,6 +132,18 @@ void getColorData(IMultiSourceFrame *frame, GLfloat *dest) {
 	SAFE_RELEASE(colorFrame);
 }
 
+glm::vec3 circlePos(float posAngle) {
+	return glm::vec3(radius * sinf(posAngle), 0.0f, -radius * (1.0f - cosf(posAngle)));
+}
+
+void getAnamorphicData(GLfloat* dest) {
+	glm::vec3 projPos = circlePos(projAngle);
+	for (int i = 0; i < DWIDTH * DHEIGHT; ++i) {
+		CameraSpacePoint p = depth2xyz[i];
+		
+	}
+}
+
 void getKinectData() {
 	IMultiSourceFrame* frame = nullptr;
 	if (!SUCCEEDED(reader->AcquireLatestFrame(&frame)))
@@ -143,13 +155,32 @@ void getKinectData() {
 	if (ptr)
 		getDepthData(frame, ptr);
 	glUnmapBuffer(GL_ARRAY_BUFFER);
+
 	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
+	
 	ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-	if (ptr)
-		getColorData(frame, ptr);
+	if (ptr) {
+		if (!anamorphosis) // Map color to points
+			getColorData(frame, ptr);
+		else // Map anamorphic image to points
+			getAnamorphicData(ptr);
+	}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
 	
 	SAFE_RELEASE(frame);
+}
+
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+	switch (key) {
+		case GLFW_KEY_ESCAPE: // Exit
+			if (action == GLFW_PRESS)
+				glfwSetWindowShouldClose(window, GL_TRUE);
+			break;
+		case GLFW_KEY_SPACE: // Toggle
+			if (action == GLFW_PRESS)
+				anamorphosis = !anamorphosis;
+			break;
+	}
 }
 
 void initOpenGL() {
@@ -157,6 +188,7 @@ void initOpenGL() {
 	glfwInit();
 	window = glfwCreateWindow(WIDTH, HEIGHT, "Video Anamorphosis", NULL, NULL);
 	glfwMakeContextCurrent(window);
+	glfwSetKeyCallback(window, keyCallback);
 	// Init GLEW
 	glewInit();
 
@@ -202,13 +234,13 @@ void update(float dt) {
 	getKinectData();
 
 	int angleDir = 0;
-	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) angleDir += 1;
-	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) angleDir -= 1;
+	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) angleDir -= 1;
+	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) angleDir += 1;
 	if (angleDir != 0) angle -= angleDir * speed;
 	
 	viewMat = glm::lookAt(
-		glm::vec3(radius * sinf(angle), 0.0f, radius * (1.0f - cosf(angle))),
-		glm::vec3(0.0f, 0.0f, radius),
+		circlePos(angle),
+		glm::vec3(0.0f, 0.0f, -radius),
 		glm::vec3(0.0f, 1.0f, 0.0f)
 	);
 	pvmMat = projMat * viewMat;
@@ -227,6 +259,10 @@ void draw() {
 	glDrawArrays(GL_POINTS, 0, DWIDTH * DHEIGHT * 3 * sizeof(GLfloat));
 }
 
+void init() {
+	
+}
+
 int main() {
 	// Init OpenGL
 	initOpenGL();
@@ -235,6 +271,8 @@ int main() {
 		std::cout << "Can't init Kinect" << std::endl;
 		return 1;
 	}
+	// Init else
+	init();
 
 	// Main loop
 	auto lastFrame = std::chrono::steady_clock::now();
