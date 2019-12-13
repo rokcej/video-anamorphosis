@@ -26,8 +26,8 @@
 #include "shaders.h"
 #include "bmp.h"
 
-#define WIDTH 1600 // Window res
-#define HEIGHT 900
+#define WIDTH 1920 // Window res
+#define HEIGHT 1080
 #define DWIDTH 512 // Depth sensor res
 #define DHEIGHT 424
 #define CWIDTH 1920 // Color camera res
@@ -55,7 +55,7 @@ unsigned char *image = nullptr;
 int imageWidth, imageHeight;
 float projAngle = 0.0f;
 float projFovy = 45.0f;
-float radius = 1.5f;
+float radius = 1.0f;
 
 // Interaction
 float angle = 0.0f; // Rotation angle
@@ -171,7 +171,7 @@ void getAnamorphicData(GLfloat* dest) {
 				*dest++ = (float)image[idx + j] / 255.0f;
 		} else {
 			for (int j = 0; j < 3; ++j)
-				*dest++ *= 0.25f;
+				*dest++ *= 0.4f;
 				//*dest++ = 0.0f;
 		}
 	}
@@ -231,7 +231,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 void initOpenGL() {
 	// Init GLFW
 	glfwInit();
-	window = glfwCreateWindow(WIDTH, HEIGHT, "Video Anamorphosis", NULL, NULL);
+	window = glfwCreateWindow(WIDTH, HEIGHT, "Video Anamorphosis", glfwGetPrimaryMonitor(), NULL);
 	glfwMakeContextCurrent(window);
 	glfwSetKeyCallback(window, keyCallback);
 	// Init GLEW
