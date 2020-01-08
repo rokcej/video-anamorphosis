@@ -20,4 +20,6 @@ The goal of this project is to project a distorted image onto a given surface, t
 | Up, Down    | Resize projection                       |
 | Space       | Toggle between live view and projection |
 | Enter       | Apply projection to current position    |
+| 1           | Move camera to projector view           |
+| 2           | Move camera to observer view            |
 | Esc         | Exit                                    |
