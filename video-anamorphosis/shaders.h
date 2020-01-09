@@ -23,14 +23,35 @@ void main() { \n\
 } \n\
 ";
 
-GLuint compileProgram() {
+
+const char* vsSourceTex = "\n\
+#version 450 core \n\
+layout (location = 0) in vec3 aPos; \n\
+out vec2 vTexCoord; \n\
+void main() { \n\
+	gl_Position = vec4(aPos, 1.0f); \n\
+	vTexCoord = vec2((aPos.x + 1.0) / 2.0, (aPos.y + 1.0) / 2.0); \n\
+} \n\
+";
+
+const char* fsSourceTex = "\n\
+#version 450 core \n\
+in vec2 vTexCoord; \n\
+out vec4 oColor; \n\
+uniform sampler2D uTex; \n\
+void main() { \n\
+	oColor = texture(uTex, vTexCoord); \n\
+} \n\
+";
+
+GLuint compileProgram(const char *vsSrc, const char *fsSrc) {
 	// Error log
 	GLint status;
 	char buf[1024];
 
 	// Vertex shader
 	GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-	glShaderSource(vs, 1, &vsSource, NULL);
+	glShaderSource(vs, 1, &vsSrc, NULL);
 	glCompileShader(vs);
 	glGetShaderiv(vs, GL_COMPILE_STATUS, &status);
 	if (status == GL_FALSE) {
@@ -40,7 +61,7 @@ GLuint compileProgram() {
 
 	// Fragment shader
 	GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-	glShaderSource(fs, 1, &fsSource, NULL);
+	glShaderSource(fs, 1, &fsSrc, NULL);
 	glCompileShader(fs);
 	glGetShaderiv(fs, GL_COMPILE_STATUS, &status);
 	if (status == GL_FALSE) {

@@ -6,6 +6,7 @@
 #include <Kinect.h>
 // Stdlib
 #include <iostream>
+#include <fstream>
 #include <stdint.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -32,13 +33,22 @@
 #define DHEIGHT 424
 #define CWIDTH 1920 // Color camera res
 #define CHEIGHT 1080
+#define PWIDTH 1920 // Projector res
+#define PHEIGHT 1080
 
 #define SAFE_RELEASE(ptr) { if (ptr) { (ptr)->Release(); (ptr) = nullptr; } }
 
+// Data
+float* triangles;
+uint8_t* pixels; // PWIDTH * PHEIGHT * 3
+
 // OpenGL variables
 GLFWwindow* window = nullptr;
-GLuint prog; // Shader program
+GLuint prog, progTex; // Shader program
 GLuint vao, vboDepth, vboColor;
+GLuint vaoTri, vboTriPos, vboTriColor;
+GLuint numTri = 0;
+GLuint vaoTex, texPix, vboTex;
 glm::mat4 viewMat, projMat, pvmMat;
 
 // Kinect variables
@@ -51,7 +61,7 @@ ColorSpacePoint depth2rgb[DWIDTH * DHEIGHT];
 CameraSpacePoint depth2xyz[DWIDTH * DHEIGHT];
 
 // Anamorphosis
-unsigned char *image = nullptr;
+uint8_t *image = nullptr;
 int imageWidth, imageHeight;
 float projAngle = 0.0f;
 float projFovy = 45.0f;
@@ -83,7 +93,10 @@ void cleanupKinect() {
 	SAFE_RELEASE(mapper);
 }
 
-void getDepthData(IMultiSourceFrame  *frame, GLfloat *dest) {
+
+bool first = true;
+
+void getDepthData(IMultiSourceFrame *frame) {
 	IDepthFrame* depthFrame = nullptr;
 	IDepthFrameReference* depthFrameRef = nullptr;
 	frame->get_DepthFrameReference(&depthFrameRef);
@@ -100,12 +113,62 @@ void getDepthData(IMultiSourceFrame  *frame, GLfloat *dest) {
 	mapper->MapDepthFrameToCameraSpace(DWIDTH * DHEIGHT, buf, DWIDTH * DHEIGHT, depth2xyz);
 	mapper->MapDepthFrameToColorSpace(DWIDTH * DHEIGHT, buf, DWIDTH * DHEIGHT, depth2rgb);
 
-	for (unsigned int i = 0; i < sz; i++) {
-		depth2xyz[i].Z *= -1.f;
-		*dest++ = depth2xyz[i].X;
-		*dest++ = depth2xyz[i].Y;
-		*dest++ = depth2xyz[i].Z;
+	glBindBuffer(GL_ARRAY_BUFFER, vboDepth);
+	GLfloat* vboDepthPtr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+	if (vboDepthPtr) {
+		for (unsigned int i = 0; i < sz; i++) {
+			// TODO: Get rid of inf
+
+			depth2xyz[i].Z *= -1.f;
+			*vboDepthPtr++ = depth2xyz[i].X;
+			*vboDepthPtr++ = depth2xyz[i].Y;
+			*vboDepthPtr++ = depth2xyz[i].Z;
+		}
 	}
+	glUnmapBuffer(GL_ARRAY_BUFFER);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vboTriPos);
+	GLfloat* vboTriPosPtr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+	if (vboDepthPtr) {
+		numTri = 0;
+		float* ptr = vboTriPosPtr;
+		for (int y = 0; y < DHEIGHT - 1; ++y) {
+			for (int x = 0; x < DWIDTH - 1; ++x) {
+				int i0 = y * DWIDTH + x;
+				int i1 = i0 + DWIDTH;
+				int i2 = i1 + 1;
+				int i3 = i0 + 1;
+
+				if (depth2xyz[i1].X > -100.0f || depth2xyz[i3].X > -100.0f) {
+					if (depth2xyz[i0].X > -100.0f) {
+						*ptr++ = depth2xyz[i0].X; *ptr++ = depth2xyz[i0].Y; *ptr++ = depth2xyz[i0].Z;
+						*ptr++ = depth2xyz[i1].X; *ptr++ = depth2xyz[i1].Y; *ptr++ = depth2xyz[i1].Z;
+						*ptr++ = depth2xyz[i3].X; *ptr++ = depth2xyz[i3].Y; *ptr++ = depth2xyz[i3].Z;
+						++numTri;
+					}
+					if (depth2xyz[i2].X > -100.0f) {
+						*ptr++ = depth2xyz[i1].X; *ptr++ = depth2xyz[i1].Y; *ptr++ = depth2xyz[i1].Z;
+						*ptr++ = depth2xyz[i2].X; *ptr++ = depth2xyz[i2].Y; *ptr++ = depth2xyz[i2].Z;
+						*ptr++ = depth2xyz[i3].X; *ptr++ = depth2xyz[i3].Y; *ptr++ = depth2xyz[i3].Z;
+						++numTri;
+					}
+				}
+			}
+		}
+		if (false && first) {
+			std::ofstream file;
+			file.open("object.obj");
+			ptr = vboTriPosPtr;
+			for (int i = 0; i < (DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3; ++i) {
+				file << "v " << *ptr++;
+				file << " " << *ptr++;
+				file << " " << *ptr++ << std::endl;
+			}
+			file.close();
+			first = false;
+		}
+	}
+	glUnmapBuffer(GL_ARRAY_BUFFER);
 	
 	SAFE_RELEASE(depthFrame);
 }
@@ -126,7 +189,7 @@ void getColorData(IMultiSourceFrame *frame, GLfloat *dest) {
 		ColorSpacePoint p = depth2rgb[i];
 		if (p.X < 0 || p.Y < 0 || p.X > CWIDTH || p.Y > CHEIGHT) { // Check if color pixel within frame
 			for (int j = 0; j < 3; ++j)
-				*dest++ = 0;
+				*dest++ = 0.0f;
 		} else {
 			int idx = (int)p.X + CWIDTH * (int)p.Y;
 			for (int j = 0; j < 3; ++j)
@@ -182,16 +245,11 @@ void getKinectData() {
 	if (!SUCCEEDED(reader->AcquireLatestFrame(&frame)))
 		return;
 
-	GLfloat* ptr;
-	glBindBuffer(GL_ARRAY_BUFFER, vboDepth);
-	ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-	if (ptr)
-		getDepthData(frame, ptr);
-	glUnmapBuffer(GL_ARRAY_BUFFER);
+	getDepthData(frame);
 
 	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
 	
-	ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+	GLfloat *ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	if (ptr) {
 		//if (!anamorphosis) // Map color to points
 			getColorData(frame, ptr);
@@ -199,7 +257,7 @@ void getKinectData() {
 			getAnamorphicData(ptr);
 	}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
-	
+
 	SAFE_RELEASE(frame);
 }
 
@@ -242,7 +300,8 @@ void initOpenGL() {
 	//glEnable(GL_CULL_FACE);
 
 	// Compile shaders
-	prog = compileProgram();
+	prog = compileProgram(vsSource, fsSource);
+	progTex = compileProgram(vsSourceTex, fsSourceTex);
 
 	// Matrices
 	viewMat = glm::lookAt(
@@ -254,6 +313,7 @@ void initOpenGL() {
 	pvmMat = projMat * viewMat;
 
 	// VAOs and VBOs
+	// Points
 	glGenVertexArrays(1, &vao);
 	glBindVertexArray(vao);
 
@@ -270,6 +330,37 @@ void initOpenGL() {
 
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+
+	// Triangles
+	glGenVertexArrays(1, &vaoTri);
+	glBindVertexArray(vaoTri);
+
+	glGenBuffers(1, &vboTriPos);
+	glBindBuffer(GL_ARRAY_BUFFER, vboTriPos);
+	glBufferData(GL_ARRAY_BUFFER, (DWIDTH-1) * (DHEIGHT-1) * 2 * 3 * 3 * sizeof(GLfloat), 0, GL_DYNAMIC_DRAW);
+
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+
+	glGenBuffers(1, &vboTriColor);
+	glBindBuffer(GL_ARRAY_BUFFER, vboTriColor);
+	glBufferData(GL_ARRAY_BUFFER, (DWIDTH-1) * (DHEIGHT-1) * 2 * 3 * 3 * sizeof(GLfloat), 0, GL_DYNAMIC_DRAW);
+	GLfloat* vboTriColorPtr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+	for (int i = 0; i < (DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3 * 3; ++i)
+		*vboTriColorPtr++ = 1.0f;
+	glUnmapBuffer(GL_ARRAY_BUFFER);
+
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+
+	// Texture
+	glGenVertexArrays(1, &vaoTex);
+	glBindVertexArray(vaoTex);
+
+	glGenTextures(1, &texPix);
+	glBindTexture(GL_TEXTURE_2D, texPix);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, PWIDTH, PHEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
@@ -301,10 +392,19 @@ void draw() {
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
 	glUseProgram(prog);
-	glBindVertexArray(vao);
+
+	glBindVertexArray(vaoTri);
 
 	glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
+	//glDrawArrays(GL_TRIANGLES, 0, (DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3 * 3 * sizeof(GLfloat));
+	glDrawArrays(GL_TRIANGLES, 0, numTri * 3 * sizeof(GLfloat));
+
+	glBindVertexArray(vao);
+
+	//glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
 
 	glPointSize((GLfloat)HEIGHT / (GLfloat)DHEIGHT * 1.2f);
 	glDrawArrays(GL_POINTS, 0, DWIDTH * DHEIGHT * 3 * sizeof(GLfloat));
@@ -313,10 +413,14 @@ void draw() {
 void init() {
 	int n;
 	image = stbi_load("image.jpg", &imageWidth, &imageHeight, &n, 3);
+	triangles = new float[(DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3 * 3];
+	pixels = new uint8_t[PWIDTH * PHEIGHT * 3];
 }
 
 void cleanup() {
 	stbi_image_free(image);
+	delete[] triangles;
+	delete[] pixels;
 }
 
 int main() {
