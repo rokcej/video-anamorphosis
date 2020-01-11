@@ -22,6 +22,7 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="approx.h" />
     <ClInclude Include="bmp.h" />
     <ClInclude Include="shaders.h" />
   </ItemGroup>

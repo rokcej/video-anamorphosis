@@ -12,6 +12,7 @@
 #include <math.h>
 #include <chrono>
 #include <vector>
+#include <algorithm>
 // GLEW
 #include <GL/glew.h>
 // GLFW
@@ -25,6 +26,7 @@
 #include <glm/gtc/type_ptr.hpp>
 // My libs
 #include "shaders.h"
+#include "approx.h"
 #include "bmp.h"
 
 #define WIDTH 1920 // Window res
@@ -37,10 +39,12 @@
 #define PHEIGHT 1080
 
 #define SAFE_RELEASE(ptr) { if (ptr) { (ptr)->Release(); (ptr) = nullptr; } }
+inline int DI(const int x, const int y) { return y * DWIDTH + x; }
 
 // Data
 float* triangles;
-uint8_t* pixels; // PWIDTH * PHEIGHT * 3
+uint8_t* pixels;
+uint16_t* depths;
 
 // OpenGL variables
 GLFWwindow* window = nullptr;
@@ -48,7 +52,7 @@ GLuint prog, progTex; // Shader program
 GLuint vao, vboDepth, vboColor;
 GLuint vaoTri, vboTriPos, vboTriColor;
 GLuint numTri = 0;
-GLuint vaoTex, texPix, vboTex;
+GLuint vaoPix, texPix, vboPix, eboTex;
 glm::mat4 viewMat, projMat, pvmMat;
 
 // Kinect variables
@@ -71,6 +75,9 @@ float radius = 1.0f; // Meters
 float angle = 0.0f; // Rotation angle
 float speed = 0.5f; // Rotation speed
 bool anamorphosis = false;
+bool debug = false;
+bool wireframe = false;
+bool approxMissing = false;
 
 bool initKinect() {
 	if (FAILED(GetDefaultKinectSensor(&sensor)))
@@ -93,7 +100,6 @@ void cleanupKinect() {
 	SAFE_RELEASE(mapper);
 }
 
-
 bool first = true;
 
 void getDepthData(IMultiSourceFrame *frame) {
@@ -109,9 +115,28 @@ void getDepthData(IMultiSourceFrame *frame) {
 	unsigned int sz;
 	uint16_t *buf;
 	depthFrame->AccessUnderlyingBuffer(&sz, &buf);
+	std::copy(buf, buf + sz, depths);
 
-	mapper->MapDepthFrameToCameraSpace(DWIDTH * DHEIGHT, buf, DWIDTH * DHEIGHT, depth2xyz);
-	mapper->MapDepthFrameToColorSpace(DWIDTH * DHEIGHT, buf, DWIDTH * DHEIGHT, depth2rgb);
+	if (approxMissing)
+		approxMissingData(depths, DWIDTH, DHEIGHT);
+
+	uint8_t* pixPtr = pixels;
+	for (int y = 0; y < 1080; ++y) {
+		for (int x = 0; x < 1920; ++x) {
+			int x2 = (x * DWIDTH) / 1920;
+			int y2 = (y * DHEIGHT) / 1080;
+			int idx = y2 * DWIDTH + x2;
+			uint8_t c = depths[idx] % 256;
+			*pixPtr++ = c;
+			*pixPtr++ = c;
+			*pixPtr++ = c;
+		}
+	}
+	glBindTexture(GL_TEXTURE_2D, texPix);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PWIDTH, PHEIGHT, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+
+	mapper->MapDepthFrameToCameraSpace(DWIDTH * DHEIGHT, depths, DWIDTH * DHEIGHT, depth2xyz);
+	mapper->MapDepthFrameToColorSpace(DWIDTH * DHEIGHT, depths, DWIDTH * DHEIGHT, depth2rgb);
 
 	glBindBuffer(GL_ARRAY_BUFFER, vboDepth);
 	GLfloat* vboDepthPtr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
@@ -283,13 +308,25 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 			if (action == GLFW_PRESS)
 				projAngle = angle;
 			break;
+		case GLFW_KEY_D: // Toggle debug mode
+			if (action == GLFW_PRESS)
+				debug = !debug;
+			break;
+		case GLFW_KEY_W: // Toggle wireframe mode
+			if (action == GLFW_PRESS)
+				wireframe = !wireframe;
+			break;
+		case GLFW_KEY_M: // Toggle getting missing depth data
+			if (action == GLFW_PRESS)
+				approxMissing = !approxMissing;
+			break;
 	}
 }
 
 void initOpenGL() {
 	// Init GLFW
 	glfwInit();
-	window = glfwCreateWindow(WIDTH, HEIGHT, "Video Anamorphosis", glfwGetPrimaryMonitor(), NULL);
+	window = glfwCreateWindow(WIDTH, HEIGHT, "Video Anamorphosis", NULL, NULL); // glfwGetPrimaryMonitor()
 	glfwMakeContextCurrent(window);
 	glfwSetKeyCallback(window, keyCallback);
 	// Init GLEW
@@ -353,14 +390,43 @@ void initOpenGL() {
 	glEnableVertexAttribArray(1);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
 
-	// Texture
-	glGenVertexArrays(1, &vaoTex);
-	glBindVertexArray(vaoTex);
+	// Pixels
+	glGenVertexArrays(1, &vaoPix);
+	glBindVertexArray(vaoPix);
 
 	glGenTextures(1, &texPix);
 	glBindTexture(GL_TEXTURE_2D, texPix);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, PWIDTH, PHEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
 
+	glActiveTexture(GL_TEXTURE0);
+
+	GLfloat pixVertices[] = {
+		// Pos				// Tex coord (flipped vertically)
+		-1.0f, +1.0f, 0.0f,	0.0f, 0.0f, // Top left
+		-1.0f, -1.0f, 0.0f,	0.0f, 1.0f, // Bottom left
+		+1.0f, -1.0f, 0.0f,	1.0f, 1.0f, // Bottom right
+		+1.0f, +1.0f, 0.0f,	1.0f, 0.0f, // Top right
+	};
+	GLuint pixIndices[] = {
+		0, 1, 2,
+		0, 2, 3
+	};
+
+	glGenBuffers(1, &vboPix);
+	glBindBuffer(GL_ARRAY_BUFFER, vboPix);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(pixVertices), pixVertices, GL_STATIC_DRAW);
+
+	glGenBuffers(1, &eboTex);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, eboTex);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(pixIndices), pixIndices, GL_STATIC_DRAW);
+
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), (GLvoid*)0);
+
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(GLfloat), (GLvoid*)(3 * sizeof(GLfloat)));
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
@@ -392,22 +458,33 @@ void draw() {
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	if (debug) {
+		glUseProgram(prog);
 
-	glUseProgram(prog);
+		if (wireframe) {
+			// Mesh
+			glBindVertexArray(vaoTri);
+			glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			//glDrawArrays(GL_TRIANGLES, 0, (DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3 * 3 * sizeof(GLfloat));
+			glDrawArrays(GL_TRIANGLES, 0, numTri * 3 * sizeof(GLfloat));
+		}
+		else {
+			// Points
+			glBindVertexArray(vao);
+			glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
+			glPointSize((GLfloat)HEIGHT / (GLfloat)DHEIGHT * 1.2f);
+			glDrawArrays(GL_POINTS, 0, DWIDTH * DHEIGHT * 3 * sizeof(GLfloat));
+		}
+	} else {
+		glUseProgram(progTex);
 
-	glBindVertexArray(vaoTri);
-
-	glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
-	//glDrawArrays(GL_TRIANGLES, 0, (DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3 * 3 * sizeof(GLfloat));
-	glDrawArrays(GL_TRIANGLES, 0, numTri * 3 * sizeof(GLfloat));
-
-	glBindVertexArray(vao);
-
-	//glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
-
-	glPointSize((GLfloat)HEIGHT / (GLfloat)DHEIGHT * 1.2f);
-	glDrawArrays(GL_POINTS, 0, DWIDTH * DHEIGHT * 3 * sizeof(GLfloat));
+		// Pixels
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		glBindVertexArray(vaoPix);
+		glUniform1i(glGetUniformLocation(progTex, "uTex"), 0);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	}
 }
 
 void init() {
@@ -415,15 +492,21 @@ void init() {
 	image = stbi_load("image.jpg", &imageWidth, &imageHeight, &n, 3);
 	triangles = new float[(DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3 * 3];
 	pixels = new uint8_t[PWIDTH * PHEIGHT * 3];
+	depths = new uint16_t[DWIDTH * DHEIGHT];
+	approxes = new Approx[DWIDTH * DHEIGHT];
 }
 
 void cleanup() {
 	stbi_image_free(image);
 	delete[] triangles;
 	delete[] pixels;
+	delete[] depths;
+	delete[] approxes;
 }
 
 int main() {
+	// My init
+	init();
 	// Init OpenGL
 	initOpenGL();
 	// Init Kinect
@@ -431,8 +514,6 @@ int main() {
 		std::cout << "Can't init Kinect" << std::endl;
 		return 1;
 	}
-	// Init else
-	init();
 
 	// Main loop
 	auto lastFrame = std::chrono::steady_clock::now();
