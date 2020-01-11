@@ -12,32 +12,6 @@ Approx* approxes;
 
 void approxMissingData(uint16_t* buf, int w, int h) {
 	// Horizontal
-	/*for (int y = 0; y < h; ++y) {
-		int i0 = y * w;
-		int i1 = (y + 1) * w - 1;
-		int iPrev = -1;
-		for (int i = i0; i <= i1; ++i) {
-			approxes[i].hori = 0.0f;
-			if (buf[i] == 0)
-				continue;
-			if (i > iPrev + 1) {
-				int v = buf[i];
-				int vPrev = v;
-				float step = 0.0f;
-				if (iPrev > -1) {
-					vPrev = buf[iPrev];
-					step = (float)(v - vPrev) / (float)(i - iPrev);
-				}
-				for (int j = iPrev + 1; j < i; ++j)
-					approxes[j].hori = vPrev + step * (j - iPrev);
-			}
-			iPrev = i;
-		}
-		if (iPrev > -1 && iPrev < i1) {
-			for (int i = iPrev + 1; i <= i1; ++i)
-				approxes[i].hori = buf[iPrev];
-		}
-	}*/
 	for (int y = 0; y < h; ++y) {
 		int xPrev = -1;
 		for (int x = 0; x < w; ++x) {
@@ -62,6 +36,7 @@ void approxMissingData(uint16_t* buf, int w, int h) {
 				approxes[DI(x, y)].hori = buf[DI(xPrev, y)];
 		}
 	}
+
 	// Vertical
 	for (int x = 0; x < w; ++x) {
 		int yPrev = -1;
@@ -87,6 +62,76 @@ void approxMissingData(uint16_t* buf, int w, int h) {
 				approxes[DI(x, y)].vert = buf[DI(x, yPrev)];
 		}
 	}
+	
+	// Diagonal
+	for (int count = 0; count < w + h - 1; ++count) {
+		{ // Diagonal 1 (top left -> bottom right)
+			int dx = count, dy = 0;
+			if (count >= w) { dx = 0; dy = count - w + 1; }
+			int dxPrev = dx - 1, dyPrev = dy - 1;
+			while (dx < w && dy < h) {
+				approxes[DI(dx, dy)].diag1 = 0.0f;
+				if (buf[DI(dx, dy)] > 0) {
+					if (dx > dxPrev + 1) {
+						int v = buf[DI(dx, dy)];
+						int vPrev = v;
+						float step = 0.0f;
+						if (dxPrev > -1 && dyPrev > -1) {
+							vPrev = buf[DI(dxPrev, dyPrev)];
+							step = (float)(v - vPrev) / (float)(dx - dxPrev);
+						}
+						int dx2 = dxPrev + 1, dy2 = dyPrev + 1;
+						while (dx2 < dx) {
+							approxes[DI(dx2, dy2)].diag1 = vPrev + step * (dx2 - dxPrev);
+							++dx2; ++dy2;
+						}
+					}
+					dxPrev = dx; dyPrev = dy;
+				}
+				++dx; ++dy;
+			}
+			if (dxPrev > -1 && dxPrev < w - 1 && dyPrev > -1 && dyPrev < h - 1) {
+				dx = dxPrev + 1; dy = dyPrev + 1;
+				while (dx < w && dy < h) {
+					approxes[DI(dx, dy)].diag1 = buf[DI(dxPrev, dyPrev)];
+					++dx; ++dy;
+				}
+			}
+		}
+		{ // Diagonal 2 (top right -> bottom left)
+			int dx = count, dy = 0;
+			if (count >= w) { dx = w - 1; dy = count - w + 1; }
+			int dxPrev = dx + 1, dyPrev = dy - 1;
+			while (dx >= 0 && dy < h) {
+				approxes[DI(dx, dy)].diag2 = 0.0f;
+				if (buf[DI(dx, dy)] > 0) {
+					if (dx < dxPrev - 1) {
+						int v = buf[DI(dx, dy)];
+						int vPrev = v;
+						float step = 0.0f;
+						if (dxPrev < w && dyPrev > -1) {
+							vPrev = buf[DI(dxPrev, dyPrev)];
+							step = (float)(v - vPrev) / (float)(dxPrev - dx);
+						}
+						int dx2 = dxPrev - 1, dy2 = dyPrev + 1;
+						while (dx2 > dx) {
+							approxes[DI(dx2, dy2)].diag2 = vPrev + step * (dxPrev - dx2);
+							--dx2; ++dy2;
+						}
+					}
+					dxPrev = dx; dyPrev = dy;
+				}
+				--dx; ++dy;
+			}
+			if (dxPrev < w && dxPrev > 0 && dyPrev > -1 && dyPrev < h - 1) {
+				dx = dxPrev - 1; dy = dyPrev + 1;
+				while (dx >= 0 && dy < h) {
+					approxes[DI(dx, dy)].diag2 = buf[DI(dxPrev, dyPrev)];
+					--dx; ++dy;
+				}
+			}
+		}
+	}
 
 	// Apply approxes
 	for (int i = 0; i < w * h; ++i) {
@@ -95,8 +140,8 @@ void approxMissingData(uint16_t* buf, int w, int h) {
 			int count = 0;
 			if (approxes[i].hori > 0) { sum += approxes[i].hori; ++count; }
 			if (approxes[i].vert > 0) { sum += approxes[i].vert; ++count; }
-			//if (approxes[i].diag1 > 0) { sum += approxes[i].diag1; ++count; }
-			//if (approxes[i].diag2 > 0) { sum += approxes[i].diag2; ++count; }
+			if (approxes[i].diag1 > 0) { sum += approxes[i].diag1; ++count; }
+			if (approxes[i].diag2 > 0) { sum += approxes[i].diag2; ++count; }
 			buf[i] = (uint16_t)(sum / (float)count); // TODO: Round approximation
 		}
 	}
