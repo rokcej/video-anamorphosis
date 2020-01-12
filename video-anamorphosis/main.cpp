@@ -76,7 +76,7 @@ float depthFovX = 0, depthFovY = 0;
 // Anamorphosis
 uint8_t *image = nullptr;
 int imageWidth, imageHeight;
-float anamorphicAngle = 90.0f;
+float anamorphicAngle = 80.0f;
 float anamorphicFovY = 20.0f;
 float radius = 0.85f; // Meters
 
@@ -89,6 +89,7 @@ bool debug = false;
 bool wireframe = false;
 bool approxMissing = false;
 int calibrate = 0;
+bool record = true;
 
 bool saveObject = false;
 
@@ -561,6 +562,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 			if (action == GLFW_PRESS)
 				calibrate = (calibrate + 1) % 3;
 			break;
+		case GLFW_KEY_R: // Toggle recording mode
+			if (action == GLFW_PRESS)
+				record = !record;
+			break;
 	}
 }
 
@@ -688,7 +693,8 @@ void initOpenGL() {
 }
 
 void update(float dt) {
-	getKinectData();
+	if (record)
+		getKinectData();
 
 	// Rotation
 	int angleDir = 0;
