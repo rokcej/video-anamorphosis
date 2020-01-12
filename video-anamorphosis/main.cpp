@@ -80,20 +80,18 @@ bool debug = false;
 bool wireframe = false;
 bool approxMissing = false;
 
-bool first = false;
+bool saveObject = false;
 
 bool initKinect() {
-	if (FAILED(GetDefaultKinectSensor(&sensor)))
-		return false;
-
-	if (!sensor)
+	if (FAILED(GetDefaultKinectSensor(&sensor)) || !sensor)
 		return false;
 
 	sensor->get_CoordinateMapper(&mapper);
 	sensor->Open();
 	sensor->OpenMultiSourceFrameReader(
 		FrameSourceTypes::FrameSourceTypes_Depth | FrameSourceTypes::FrameSourceTypes_Color,
-		&reader);
+		&reader
+	);
 	return reader; // TODO
 }
 
@@ -103,7 +101,7 @@ void cleanupKinect() {
 	SAFE_RELEASE(mapper);
 }
 
-void getDepthData(IMultiSourceFrame* frame) {
+bool getDepthData(IMultiSourceFrame* frame) {
 	IDepthFrame* depthFrame = nullptr;
 	IDepthFrameReference* depthFrameRef = nullptr;
 	frame->get_DepthFrameReference(&depthFrameRef);
@@ -111,7 +109,7 @@ void getDepthData(IMultiSourceFrame* frame) {
 	SAFE_RELEASE(depthFrameRef);
 
 	if (!depthFrame)
-		return;
+		return false;
 
 	unsigned int sz;
 	uint16_t* buf;
@@ -119,9 +117,11 @@ void getDepthData(IMultiSourceFrame* frame) {
 	std::copy(buf, buf + sz, depths);
 
 	SAFE_RELEASE(depthFrame);
+
+	return true;
 }
 
-void getColorData(IMultiSourceFrame* frame) {
+bool getColorData(IMultiSourceFrame* frame) {
 	IColorFrame* colorFrame = nullptr;
 	IColorFrameReference* colorFrameRef = nullptr;
 	frame->get_ColorFrameReference(&colorFrameRef);
@@ -129,11 +129,13 @@ void getColorData(IMultiSourceFrame* frame) {
 	SAFE_RELEASE(colorFrameRef);
 
 	if (!colorFrame)
-		return;
+		return false;
 
 	colorFrame->CopyConvertedFrameDataToArray(CWIDTH * CHEIGHT * 4, rgbaBuf, ColorImageFormat_Rgba);
 
 	SAFE_RELEASE(colorFrame);
+
+	return true;
 }
 
 void processDepthData() {
@@ -141,17 +143,15 @@ void processDepthData() {
 		approxMissingData(depths, DWIDTH, DHEIGHT);
 
 	uint8_t* pixPtr = pixels;
-	int ctr = 0;
 	for (int y = 0; y < 1080; ++y) {
 		for (int x = 0; x < 1920; ++x) {
 			int x2 = (x * DWIDTH) / 1920;
 			int y2 = (y * DHEIGHT) / 1080;
 			int idx = y2 * DWIDTH + x2;
 			uint8_t c = depths[idx] % 256;
-			*pixPtr++ = rgbaBuf[ctr++];
-			*pixPtr++ = rgbaBuf[ctr++];
-			*pixPtr++ = rgbaBuf[ctr++];
-			ctr++;
+			*pixPtr++ = c;
+			*pixPtr++ = c;
+			*pixPtr++ = c;
 		}
 	}
 	glBindTexture(GL_TEXTURE_2D, texPix);
@@ -226,7 +226,7 @@ void processDepthData() {
 				}
 			}
 		}
-		if (first) {
+		if (saveObject) {
 			std::ofstream file;
 			file.open("object.obj");
 			ptr = vboTriPosPtr;
@@ -242,7 +242,7 @@ void processDepthData() {
 				file << " " << ctr++ << std::endl;
 			}
 			file.close();
-			first = false;
+			saveObject = false;
 		}
 	}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
@@ -307,24 +307,24 @@ void getKinectData() {
 	if (!SUCCEEDED(reader->AcquireLatestFrame(&frame)))
 		return;
 
-	getDepthData(frame);
-	getColorData(frame);
+	bool depthUpdate = getDepthData(frame);
+	bool colorUpdate = getColorData(frame);
 
-	SAFE_RELEASE(frame);
-}
-
-void processKinectData() {
-	processDepthData();
+	if (depthUpdate)
+		processDepthData();
 
 	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
 	GLfloat* ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	if (ptr) {
 		//if (!anamorphosis) // Map color to points
-		processColorData(ptr);
+		if (colorUpdate)
+			processColorData(ptr);
 		if (anamorphosis) // Map anamorphic image to points
 			processAnamorphicData(ptr);
 	}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
+
+	SAFE_RELEASE(frame);
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -475,7 +475,6 @@ void initOpenGL() {
 
 void update(float dt) {
 	getKinectData();
-	processKinectData();
 
 	// Rotation
 	int angleDir = 0;
