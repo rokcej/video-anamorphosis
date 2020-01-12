@@ -39,7 +39,8 @@
 #define PHEIGHT 1080
 
 #define SAFE_RELEASE(ptr) { if (ptr) { (ptr)->Release(); (ptr) = nullptr; } }
-inline int DI(const int x, const int y) { return y * DWIDTH + x; }
+
+inline int DI(const int x, const int y) { return y * DWIDTH + x; } // Depth index
 
 // Data
 float* triangles;
@@ -79,6 +80,8 @@ bool debug = false;
 bool wireframe = false;
 bool approxMissing = false;
 
+bool first = false;
+
 bool initKinect() {
 	if (FAILED(GetDefaultKinectSensor(&sensor)))
 		return false;
@@ -100,9 +103,7 @@ void cleanupKinect() {
 	SAFE_RELEASE(mapper);
 }
 
-bool first = true;
-
-void getDepthData(IMultiSourceFrame *frame) {
+void getDepthData(IMultiSourceFrame* frame) {
 	IDepthFrame* depthFrame = nullptr;
 	IDepthFrameReference* depthFrameRef = nullptr;
 	frame->get_DepthFrameReference(&depthFrameRef);
@@ -113,23 +114,44 @@ void getDepthData(IMultiSourceFrame *frame) {
 		return;
 
 	unsigned int sz;
-	uint16_t *buf;
+	uint16_t* buf;
 	depthFrame->AccessUnderlyingBuffer(&sz, &buf);
 	std::copy(buf, buf + sz, depths);
 
+	SAFE_RELEASE(depthFrame);
+}
+
+void getColorData(IMultiSourceFrame* frame) {
+	IColorFrame* colorFrame = nullptr;
+	IColorFrameReference* colorFrameRef = nullptr;
+	frame->get_ColorFrameReference(&colorFrameRef);
+	colorFrameRef->AcquireFrame(&colorFrame);
+	SAFE_RELEASE(colorFrameRef);
+
+	if (!colorFrame)
+		return;
+
+	colorFrame->CopyConvertedFrameDataToArray(CWIDTH * CHEIGHT * 4, rgbaBuf, ColorImageFormat_Rgba);
+
+	SAFE_RELEASE(colorFrame);
+}
+
+void processDepthData() {
 	if (approxMissing)
 		approxMissingData(depths, DWIDTH, DHEIGHT);
 
 	uint8_t* pixPtr = pixels;
+	int ctr = 0;
 	for (int y = 0; y < 1080; ++y) {
 		for (int x = 0; x < 1920; ++x) {
 			int x2 = (x * DWIDTH) / 1920;
 			int y2 = (y * DHEIGHT) / 1080;
 			int idx = y2 * DWIDTH + x2;
 			uint8_t c = depths[idx] % 256;
-			*pixPtr++ = c;
-			*pixPtr++ = c;
-			*pixPtr++ = c;
+			*pixPtr++ = rgbaBuf[ctr++];
+			*pixPtr++ = rgbaBuf[ctr++];
+			*pixPtr++ = rgbaBuf[ctr++];
+			ctr++;
 		}
 	}
 	glBindTexture(GL_TEXTURE_2D, texPix);
@@ -138,12 +160,36 @@ void getDepthData(IMultiSourceFrame *frame) {
 	mapper->MapDepthFrameToCameraSpace(DWIDTH * DHEIGHT, depths, DWIDTH * DHEIGHT, depth2xyz);
 	mapper->MapDepthFrameToColorSpace(DWIDTH * DHEIGHT, depths, DWIDTH * DHEIGHT, depth2rgb);
 
+	/*float xMax = 0; float xMin = 1000;
+	float yMax = 0; float yMin = 1000;
+	for (int i = 0; i < sz; ++i) {
+		if (buf[i] != 0) {
+			glm::vec3 pt = glm::vec3(depth2xyz[i].X, depth2xyz[i].Y, depth2xyz[i].Z);
+			pt /= pt.z;
+			float rx = ((float)(i % DWIDTH) / (DWIDTH - 1.0f) - 0.5f) * 2.0f;
+			float ry = (0.5f - (float)(i / DWIDTH) / (DHEIGHT - 1.0f)) * 2.0f;
+
+			float x = pt.x / rx;
+			float y = pt.y / ry;
+
+			float xPhi = acosf(1 / sqrtf(x * x + 1));
+			float yPhi = acosf(1 / sqrtf(y * y + 1));
+			
+			if (xPhi < xMin) xMin = xPhi;
+			if (xPhi > xMax) xMax = xPhi;
+			if (yPhi < yMin) yMin = yPhi;
+			if (yPhi > yMax) yMax = yPhi;
+
+			//std::cout << pt.x << " " << rx << ", " << pt.y << " " << ry << std::endl;
+			//std::cout << xPhi << " " << yPhi << std::endl;
+		}
+	}
+	std::cout << xMin << " " << xMax << ", " << yMin << " " << yMax << std::endl;*/
+
 	glBindBuffer(GL_ARRAY_BUFFER, vboDepth);
 	GLfloat* vboDepthPtr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	if (vboDepthPtr) {
-		for (unsigned int i = 0; i < sz; i++) {
-			// TODO: Get rid of inf
-
+		for (unsigned int i = 0; i < DWIDTH * DHEIGHT; i++) {
 			depth2xyz[i].Z *= -1.f;
 			*vboDepthPtr++ = depth2xyz[i].X;
 			*vboDepthPtr++ = depth2xyz[i].Y;
@@ -180,36 +226,29 @@ void getDepthData(IMultiSourceFrame *frame) {
 				}
 			}
 		}
-		if (false && first) {
+		if (first) {
 			std::ofstream file;
 			file.open("object.obj");
 			ptr = vboTriPosPtr;
-			for (int i = 0; i < (DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3; ++i) {
+			for (int i = 0; i < numTri * 3; ++i) {
 				file << "v " << *ptr++;
 				file << " " << *ptr++;
 				file << " " << *ptr++ << std::endl;
+			}
+			int ctr = 1;
+			for (int i = 0; i < numTri; ++i) {
+				file << "f " << ctr++;
+				file << " " << ctr++;
+				file << " " << ctr++ << std::endl;
 			}
 			file.close();
 			first = false;
 		}
 	}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
-	
-	SAFE_RELEASE(depthFrame);
 }
 
-void getColorData(IMultiSourceFrame *frame, GLfloat *dest) {
-	IColorFrame* colorFrame = nullptr;
-	IColorFrameReference* colorFrameRef = nullptr;
-	frame->get_ColorFrameReference(&colorFrameRef);
-	colorFrameRef->AcquireFrame(&colorFrame);
-	SAFE_RELEASE(colorFrameRef);
-
-	if (!colorFrame)
-		return;
-
-	colorFrame->CopyConvertedFrameDataToArray(CWIDTH * CHEIGHT * 4, rgbaBuf, ColorImageFormat_Rgba);
-
+void processColorData(GLfloat* dest) {
 	for (int i = 0; i < DWIDTH * DHEIGHT; ++i) {
 		ColorSpacePoint p = depth2rgb[i];
 		if (p.X < 0 || p.Y < 0 || p.X > CWIDTH || p.Y > CHEIGHT) { // Check if color pixel within frame
@@ -221,8 +260,6 @@ void getColorData(IMultiSourceFrame *frame, GLfloat *dest) {
 				*dest++ = rgbaBuf[4 * idx + j] / 255.f;
 		}
 	}
-
-	SAFE_RELEASE(colorFrame);
 }
 
 glm::vec3 circlePos(float angleDeg) {
@@ -230,7 +267,7 @@ glm::vec3 circlePos(float angleDeg) {
 	return glm::vec3(radius * sinf(angleRad), 0.0f, -radius * (1.0f - cosf(angleRad)));
 }
 
-void getAnamorphicData(GLfloat* dest) {
+void processAnamorphicData(GLfloat* dest) {
 	glm::vec3 projPos = circlePos(projAngle);
 	glm::vec3 projTarget(0.0f, 0.0f, -radius);
 	glm::vec3 projDir = glm::normalize(projTarget - projPos);
@@ -271,19 +308,23 @@ void getKinectData() {
 		return;
 
 	getDepthData(frame);
-
-	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
-	
-	GLfloat *ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-	if (ptr) {
-		//if (!anamorphosis) // Map color to points
-			getColorData(frame, ptr);
-		if (anamorphosis) // Map anamorphic image to points
-			getAnamorphicData(ptr);
-	}
-	glUnmapBuffer(GL_ARRAY_BUFFER);
+	getColorData(frame);
 
 	SAFE_RELEASE(frame);
+}
+
+void processKinectData() {
+	processDepthData();
+
+	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
+	GLfloat* ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+	if (ptr) {
+		//if (!anamorphosis) // Map color to points
+		processColorData(ptr);
+		if (anamorphosis) // Map anamorphic image to points
+			processAnamorphicData(ptr);
+	}
+	glUnmapBuffer(GL_ARRAY_BUFFER);
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -434,6 +475,7 @@ void initOpenGL() {
 
 void update(float dt) {
 	getKinectData();
+	processKinectData();
 
 	// Rotation
 	int angleDir = 0;
