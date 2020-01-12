@@ -30,8 +30,8 @@
 #include "approx.h"
 #include "bmp.h"
 
-#define WIDTH 1600 // Window res
-#define HEIGHT 1200
+#define WIDTH 1920 // Window res
+#define HEIGHT 1080
 #define DWIDTH 512 // Depth sensor res
 #define DHEIGHT 424
 #define CWIDTH 1920 // Color camera res
@@ -90,6 +90,7 @@ bool wireframe = false;
 bool approxMissing = false;
 int calibrate = 0;
 bool record = true;
+bool kinectMap = true;
 
 bool saveObject = false;
 
@@ -163,11 +164,36 @@ bool getColorData(IMultiSourceFrame* frame) {
 	return true;
 }
 
+void myDepthTo3D() {
+	float uLen = tanf(RAD(depthFovX * 0.5));
+	float vLen = tanf(RAD(depthFovY * 0.5));
+
+	for (int y = 0; y < DHEIGHT; ++y) {
+		for (int x = 0; x < DWIDTH; ++x) {
+			int idx = y * DWIDTH + x;
+			float d = (float)depths[idx] / 1000.0f; // mm => m
+
+			float u = (float)x / (DWIDTH - 1.0f) * 2.0f - 1.0f;
+			float v = 1.0f - (float)y / (DHEIGHT - 1.0f) * 2.0f;
+
+			glm::vec3 dir(u * uLen, v * vLen, 1.0f);
+			glm::vec3 point = dir * d;
+
+			depth2xyz[idx].X = point.x;
+			depth2xyz[idx].Y = point.y;
+			depth2xyz[idx].Z = point.z;
+		}
+	}
+}
+
 void processDepthData() {
 	if (approxMissing)
 		approxMissingData(depths, DWIDTH, DHEIGHT);
 
-	mapper->MapDepthFrameToCameraSpace(DWIDTH * DHEIGHT, depths, DWIDTH * DHEIGHT, depth2xyz);
+	if (kinectMap)
+		mapper->MapDepthFrameToCameraSpace(DWIDTH * DHEIGHT, depths, DWIDTH * DHEIGHT, depth2xyz);
+	else
+		myDepthTo3D();
 	mapper->MapDepthFrameToColorSpace(DWIDTH * DHEIGHT, depths, DWIDTH * DHEIGHT, depth2rgb);
 
 	/*for (int i = 0; i < 100; ++i) {
@@ -566,6 +592,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 			if (action == GLFW_PRESS)
 				record = !record;
 			break;
+		case GLFW_KEY_K: // Toggle mapping mode
+			if (action == GLFW_PRESS)
+				kinectMap = !kinectMap;
+			break;
 	}
 }
 
@@ -585,7 +615,9 @@ void initOpenGL() {
 	int monitorCount;
 	GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
 	GLFWmonitor* monitor = monitors[monitorCount - 1];
-	window = glfwCreateWindow(PWIDTH, PHEIGHT, "Video Anamorphosis", monitor, NULL); // glfwGetPrimaryMonitor()
+	monitor = glfwGetPrimaryMonitor();
+	
+	window = glfwCreateWindow(WIDTH, HEIGHT, "Video Anamorphosis", monitor, NULL); // glfwGetPrimaryMonitor()
 	glfwMakeContextCurrent(window);
 	glfwSetKeyCallback(window, keyCallback);
 	glfwSetScrollCallback(window, scrollCallback);
@@ -705,7 +737,7 @@ void update(float dt) {
 	int fovDir = 0;
 	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) fovDir += 1;
 	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) fovDir -= 1;
-	if (fovDir != 0) anamorphicFovY += fovDir * rotSpeed * dt;
+	if (fovDir != 0) anamorphicFovY += fovDir * dt;
 	
 	glm::vec3 eye = circlePos(rotAngle);
 	glm::vec3 center(0.0f, 0.0f, -radius);
