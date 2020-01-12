@@ -13,6 +13,7 @@
 #include <chrono>
 #include <vector>
 #include <algorithm>
+#include <thread>
 // GLEW
 #include <GL/glew.h>
 // GLFW
@@ -37,6 +38,8 @@
 #define CHEIGHT 1080
 #define PWIDTH 1600 // Projector res
 #define PHEIGHT 1200
+
+#define NUM_THREADS 8
 
 constexpr float projFovX = 37.55606644f;
 constexpr float projFovY = 28.61110369f;
@@ -74,17 +77,18 @@ float depthFovX = 0, depthFovY = 0;
 uint8_t *image = nullptr;
 int imageWidth, imageHeight;
 float anamorphicAngle = 90.0f;
-float anamorphicFovY = 15.0f;
-float radius = 0.8f; // Meters
+float anamorphicFovY = 20.0f;
+float radius = 0.85f; // Meters
 
 // Interaction
-float angle = 0.0f; // Rotation angle
-float speed = 1.5f; // Rotation speed
+float rotAngle = 0.0f; // Rotation angle
+float rotSpeed = 30.0f; // Rotation speed
+float zoomStep = 1.02f;
 bool anamorphosis = false;
 bool debug = false;
 bool wireframe = false;
 bool approxMissing = false;
-bool calibrate = false;
+int calibrate = 0;
 
 bool saveObject = false;
 
@@ -201,89 +205,66 @@ void processDepthData() {
 	glUnmapBuffer(GL_ARRAY_BUFFER);
 
 	// Create mesh from points
-	glBindBuffer(GL_ARRAY_BUFFER, vboTriPos);
-	GLfloat* vboTriPosPtr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-	if (vboDepthPtr) {
-		numTri = 0;
-		float* ptr = vboTriPosPtr;
-		for (int y = 0; y < DHEIGHT - 1; ++y) {
-			for (int x = 0; x < DWIDTH - 1; ++x) {
-				int i0 = y * DWIDTH + x;
-				int i1 = i0 + DWIDTH;
-				int i2 = i1 + 1;
-				int i3 = i0 + 1;
+	if (wireframe) {
+		glBindBuffer(GL_ARRAY_BUFFER, vboTriPos);
+		GLfloat* vboTriPosPtr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+		if (vboDepthPtr) {
+			numTri = 0;
+			float* ptr = vboTriPosPtr;
+			for (int y = 0; y < DHEIGHT - 1; ++y) {
+				for (int x = 0; x < DWIDTH - 1; ++x) {
+					int i0 = y * DWIDTH + x;
+					int i1 = i0 + DWIDTH;
+					int i2 = i1 + 1;
+					int i3 = i0 + 1;
 
-				if (depth2xyz[i1].X > -100.0f || depth2xyz[i3].X > -100.0f) {
-					if (depth2xyz[i0].X > -100.0f) {
-						*ptr++ = depth2xyz[i0].X; *ptr++ = depth2xyz[i0].Y; *ptr++ = depth2xyz[i0].Z;
-						*ptr++ = depth2xyz[i1].X; *ptr++ = depth2xyz[i1].Y; *ptr++ = depth2xyz[i1].Z;
-						*ptr++ = depth2xyz[i3].X; *ptr++ = depth2xyz[i3].Y; *ptr++ = depth2xyz[i3].Z;
-						++numTri;
-					}
-					if (depth2xyz[i2].X > -100.0f) {
-						*ptr++ = depth2xyz[i1].X; *ptr++ = depth2xyz[i1].Y; *ptr++ = depth2xyz[i1].Z;
-						*ptr++ = depth2xyz[i2].X; *ptr++ = depth2xyz[i2].Y; *ptr++ = depth2xyz[i2].Z;
-						*ptr++ = depth2xyz[i3].X; *ptr++ = depth2xyz[i3].Y; *ptr++ = depth2xyz[i3].Z;
-						++numTri;
+					if (depth2xyz[i1].X > -100.0f || depth2xyz[i3].X > -100.0f) {
+						if (depth2xyz[i0].X > -100.0f) {
+							*ptr++ = depth2xyz[i0].X; *ptr++ = depth2xyz[i0].Y; *ptr++ = depth2xyz[i0].Z;
+							*ptr++ = depth2xyz[i1].X; *ptr++ = depth2xyz[i1].Y; *ptr++ = depth2xyz[i1].Z;
+							*ptr++ = depth2xyz[i3].X; *ptr++ = depth2xyz[i3].Y; *ptr++ = depth2xyz[i3].Z;
+							++numTri;
+						}
+						if (depth2xyz[i2].X > -100.0f) {
+							*ptr++ = depth2xyz[i1].X; *ptr++ = depth2xyz[i1].Y; *ptr++ = depth2xyz[i1].Z;
+							*ptr++ = depth2xyz[i2].X; *ptr++ = depth2xyz[i2].Y; *ptr++ = depth2xyz[i2].Z;
+							*ptr++ = depth2xyz[i3].X; *ptr++ = depth2xyz[i3].Y; *ptr++ = depth2xyz[i3].Z;
+							++numTri;
+						}
 					}
 				}
 			}
-		}
-		if (saveObject) {
-			std::ofstream file;
-			file.open("object.obj");
-			ptr = vboTriPosPtr;
-			for (unsigned  int i = 0; i < numTri * 3; ++i) {
-				file << "v " << *ptr++;
-				file << " " << *ptr++;
-				file << " " << *ptr++ << std::endl;
+			if (saveObject) {
+				std::ofstream file;
+				file.open("object.obj");
+				ptr = vboTriPosPtr;
+				for (unsigned int i = 0; i < numTri * 3; ++i) {
+					file << "v " << *ptr++;
+					file << " " << *ptr++;
+					file << " " << *ptr++ << std::endl;
+				}
+				int ctr = 1;
+				for (unsigned int i = 0; i < numTri; ++i) {
+					file << "f " << ctr++;
+					file << " " << ctr++;
+					file << " " << ctr++ << std::endl;
+				}
+				file.close();
+				saveObject = false;
 			}
-			int ctr = 1;
-			for (unsigned int i = 0; i < numTri; ++i) {
-				file << "f " << ctr++;
-				file << " " << ctr++;
-				file << " " << ctr++ << std::endl;
-			}
-			file.close();
-			saveObject = false;
 		}
+		glUnmapBuffer(GL_ARRAY_BUFFER);
 	}
-	glUnmapBuffer(GL_ARRAY_BUFFER);
 }
 
-void getPixels() {
-	/*uint8_t* pixPtr = pixels;
-	for (int y = 0; y < PHEIGHT; ++y) {
-		for (int x = 0; x < PWIDTH; ++x) {
-			int x2 = (x * DWIDTH) / PWIDTH;
-			int y2 = (y * DHEIGHT) / PHEIGHT;
-			int idx = y2 * DWIDTH + x2;
-			uint8_t c = depths[idx] % 256;
-			*pixPtr++ = c;
-			*pixPtr++ = c;
-			*pixPtr++ = c;
-		}
-	}*/
+void getPixelsThread(int offset, glm::vec3 projPos, glm::vec3 projDir, glm::vec3 projRight, glm::vec3 projUp, float uMax, float vMax) {
+	for (int py = offset; py < PHEIGHT; py += NUM_THREADS) {
+		for (int px = 0; px < PWIDTH; ++px) {
+			int pIdx = 3 * ((py + 1) * PWIDTH - 1 - px);
 
-	glm::vec3 projPos = circlePos(anamorphicAngle);
-	glm::vec3 projTarget(0.0f, 0.0f, -radius);
-	glm::vec3 projDir = glm::normalize(projTarget - projPos);
-	//glm::vec3 projUp(0.0f, 1.0f, 0.0f);
-	//glm::vec3 projRight = glm::normalize(glm::cross(projDir, projUp)); // Should already be normal TODO REMOVE
-	glm::vec3 projRight(1.0f, 0.0f, 0.0f);
-	glm::vec3 projUp = glm::normalize(glm::cross(projRight, projDir));
+			for (int i = 0; i < 3; ++i)
+				pixels[pIdx + i] = 0;
 
-	float ratio = (float)imageWidth / (float)imageHeight;
-	float vMax = tanf(anamorphicFovY * (float)M_PI / 360.0f);
-	float uMax = vMax * ratio;
-
-	uint8_t* ptr = pixels;
-	for (int i = 0; i < PHEIGHT * PWIDTH * 3; ++i)
-		*ptr++ = 0;
-
-	ptr = pixels;
-	for (int py = 0; py < PHEIGHT; ++py) {
-		for (int px = PWIDTH - 1; px >= 0; --px) {
 			float x = 2.0f * (float)px / (PWIDTH - 1.0f) - 1.0f;
 			float y = 1.0f - 2.0f * (float)py / (PHEIGHT - 1.0f);
 
@@ -293,35 +274,33 @@ void getPixels() {
 			x = (x + 1.0f) * 0.5f * (DWIDTH - 1.0f);
 			y = (1.0f - y) * 0.5f * (DHEIGHT - 1.0f);
 
-			int dx = (int)x; // TODO: Sample pixels around it
-			int dy = (int)y;
+			if (x >= 0.0f && x < DWIDTH - 1.0f && y >= 0.0f && y <= DHEIGHT - 1.0f) {
+				int dx = (int)x;
+				int dy = (int)y;
 
-			if (dx >= 0 && dx < DWIDTH && dy >= 0 && dy < DHEIGHT) {
-				/*for (int j = 0; j < 3; ++j)
-					*ptr++ = depths[dy * DWIDTH + dx];
-				continue;*/
+				int xUp = (int)ceilf(x);
+				int xDown = (int)x;
+				int yUp = (int)ceilf(y);
+				int yDown = (int)y;
 
+				CameraSpacePoint csp00 = depth2xyz[yDown * DWIDTH + xDown];
+				CameraSpacePoint csp01 = depth2xyz[yDown * DWIDTH + xUp];
+				CameraSpacePoint csp10 = depth2xyz[yUp * DWIDTH + xDown];
+				CameraSpacePoint csp11 = depth2xyz[yUp * DWIDTH + xUp];
 
+				glm::vec3 p00(csp00.X, csp00.Y, csp00.Z);
+				glm::vec3 p01(csp01.X, csp01.Y, csp01.Z);
+				glm::vec3 p10(csp10.X, csp10.Y, csp10.Z);
+				glm::vec3 p11(csp11.X, csp11.Y, csp11.Z);
 
+				float wx = x - (float)xDown;
+				float wy = y - (float)yDown;
 
-				//ColorSpacePoint p = depth2rgb[dy * DWIDTH + dx];
-				//if (p.X < 0 || p.Y < 0 || p.X > CWIDTH || p.Y > CHEIGHT) { // Check if color pixel within frame
-				//	for (int j = 0; j < 3; ++j)
-				//		*ptr++ = 0;
-				//}
-				//else {
-				//	int idx = (int)p.X + CWIDTH * (int)p.Y;
-				//	for (int j = 0; j < 3; ++j)
-				//		*ptr++ = rgbaBuf[4 * idx + j];
-				//}
-				//continue;
+				glm::vec3 point = (p00 * (2.0f - wx - wy) + p01 * (1.0f + wx - wy) + p10 * (1.0f - wx + wy) + p11 * (wx + wy)) * 0.25f;
 
-
-
-				CameraSpacePoint point = depth2xyz[dy * DWIDTH + dx];
 				//point.Y += 0.08f; // TODO: Shift to projector
 
-				glm::vec3 rayDir = glm::vec3(point.X, point.Y, point.Z) - projPos;
+				glm::vec3 rayDir = point - projPos;
 
 				float t = glm::dot(projDir, projDir) / glm::dot(projDir, rayDir);
 				glm::vec3 uv = t * rayDir - projDir;
@@ -334,15 +313,103 @@ void getPixels() {
 				if (x >= 0 && x < imageWidth && y >= 0 && y < imageHeight) {
 					int idx = (y * imageWidth + x) * 3;
 					for (int j = 0; j < 3; ++j)
-						*ptr++ = image[idx + j];
+						pixels[pIdx + j] = image[idx + j];
+					//*ptr++ = image[idx + j];
 				}
 				else {
 					for (int j = 0; j < 3; ++j)
-						*ptr++ *= 0;
+						pixels[pIdx + j] = 0;
+					//*ptr++ *= 0;
 				}
 			}
 		}
 	}
+}
+
+void getPixels() {
+	glm::vec3 projPos = circlePos(anamorphicAngle);
+	glm::vec3 projTarget(0.0f, 0.0f, -radius);
+	glm::vec3 projDir = glm::normalize(projTarget - projPos);
+	//glm::vec3 projUp(0.0f, 1.0f, 0.0f);
+	//glm::vec3 projRight = glm::normalize(glm::cross(projDir, projUp)); // Should already be normal TODO REMOVE
+	glm::vec3 projRight(1.0f, 0.0f, 0.0f);
+	glm::vec3 projUp = glm::normalize(glm::cross(projRight, projDir));
+
+	float ratio = (float)imageWidth / (float)imageHeight;
+	float vMax = tanf(anamorphicFovY * (float)M_PI / 360.0f);
+	float uMax = vMax * ratio;
+
+
+	std::thread threads[NUM_THREADS];
+	for (int i = 0; i < NUM_THREADS; ++i)
+		threads[i] = std::thread(getPixelsThread, i, projPos, projDir, projRight, projUp, uMax, vMax);
+	for (int i = 0; i < NUM_THREADS; ++i)
+		threads[i].join();
+
+	/*for (int py = 0; py < PHEIGHT; ++py) {
+		for (int px = PWIDTH - 1; px >= 0; --px) {
+			int pIdx = 3 * (py * PWIDTH + px);
+			for (int i = 0; i < 3; ++i)
+				pixels[pIdx + i] = 0;
+
+			float x = 2.0f * (float)px / (PWIDTH - 1.0f) - 1.0f;
+			float y = 1.0f - 2.0f * (float)py / (PHEIGHT - 1.0f);
+
+			x = x * tanf(RAD(projFovX * 0.5f)) / tanf(RAD(depthFovX * 0.5f));
+			y = y * tanf(RAD(projFovY * 0.5f)) / tanf(RAD(depthFovY * 0.5f));
+
+			x = (x + 1.0f) * 0.5f * (DWIDTH - 1.0f);
+			y = (1.0f - y) * 0.5f * (DHEIGHT - 1.0f);
+
+			if (x >= 0.0f && x < DWIDTH - 1.0f && y >= 0.0f && y <= DHEIGHT - 1.0f) {
+				int dx = (int)x;
+				int dy = (int)y;
+
+				int xUp = (int)ceilf(x);
+				int xDown = (int)x;
+				int yUp = (int)ceilf(y);
+				int yDown = (int)y;
+
+				CameraSpacePoint csp00 = depth2xyz[yDown * DWIDTH + xDown];
+				CameraSpacePoint csp01 = depth2xyz[yDown * DWIDTH + xUp];
+				CameraSpacePoint csp10 = depth2xyz[yUp * DWIDTH + xDown];
+				CameraSpacePoint csp11 = depth2xyz[yUp * DWIDTH + xUp];
+
+				glm::vec3 p00(csp00.X, csp00.Y, csp00.Z);
+				glm::vec3 p01(csp01.X, csp01.Y, csp01.Z);
+				glm::vec3 p10(csp10.X, csp10.Y, csp10.Z);
+				glm::vec3 p11(csp11.X, csp11.Y, csp11.Z);
+
+				float wx = x - (float)xDown;
+				float wy = y - (float)yDown;
+
+				glm::vec3 point = (p00 * (2.0f - wx - wy) + p01 * (1.0f + wx - wy) + p10 * (1.0f - wx + wy) + p11 * (wx + wy)) * 0.25f;
+				
+				//point.Y += 0.08f; // TODO: Shift to projector
+
+				glm::vec3 rayDir = point - projPos;
+
+				float t = glm::dot(projDir, projDir) / glm::dot(projDir, rayDir);
+				glm::vec3 uv = t * rayDir - projDir;
+				float u = glm::dot(uv, projRight);
+				float v = glm::dot(uv, -projUp);
+
+				int x = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(imageWidth - 1));
+				int y = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(imageHeight - 1));
+
+				if (x >= 0 && x < imageWidth && y >= 0 && y < imageHeight) {
+					int idx = (y * imageWidth + x) * 3;
+					for (int j = 0; j < 3; ++j)
+						pixels[pIdx + j] = image[idx + j];
+						//*ptr++ = image[idx + j];
+				} else {
+					for (int j = 0; j < 3; ++j)
+						pixels[pIdx + j] = 0;
+						//*ptr++ *= 0;
+				}
+			}
+		}
+	}*/
 	
 	glBindTexture(GL_TEXTURE_2D, texPix);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PWIDTH, PHEIGHT, GL_RGB, GL_UNSIGNED_BYTE, pixels);
@@ -363,8 +430,10 @@ void processColorData(GLfloat* dest) {
 	}
 
 	if (calibrate) {
-		for (int py = 0; py < PHEIGHT; ++py) {
-			for (int px = PWIDTH - 1; px >= 0; --px) {
+		int xIncrement = calibrate == 1 ? 1 : PWIDTH - 1;
+		int yIncrement = calibrate == 1 ? 1 : PHEIGHT - 1;
+		for (int py = 0; py < PHEIGHT; py += yIncrement) {
+			for (int px = PWIDTH - 1; px >= 0; px -= xIncrement) {
 				float x = 2.0f * (float)px / (PWIDTH - 1.0f) - 1.0f;
 				float y = 1.0f - 2.0f * (float)py / (PHEIGHT - 1.0f);
 
@@ -374,7 +443,7 @@ void processColorData(GLfloat* dest) {
 				x = (x + 1.0f) * 0.5f * (DWIDTH - 1.0f);
 				y = (1.0f - y) * 0.5f * (DHEIGHT - 1.0f);
 
-				int dx = (int)x; // TODO: Sample pixels around it
+				int dx = (int)x;
 				int dy = (int)y;
 
 				if (dx >= 0 && dx < DWIDTH && dy >= 0 && dy < DHEIGHT) {
@@ -436,14 +505,15 @@ void getKinectData() {
 
 	if (depthUpdate) {
 		processDepthData();
-		getPixels();
+		if (!debug)
+			getPixels();
 	}
 
 	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
 	GLfloat* ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	if (ptr) {
 		//if (!anamorphosis) // Map color to points
-		if (colorUpdate)
+		if (colorUpdate && debug)
 			processColorData(ptr);
 		if (anamorphosis) // Map anamorphic image to points
 			processAnamorphicData(ptr);
@@ -465,15 +535,15 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 			break;
 		case GLFW_KEY_1: // Projector view
 			if (action == GLFW_PRESS)
-				angle = 0.0f;
+				rotAngle = 0.0f;
 			break;
 		case GLFW_KEY_2: // Observer view
 			if (action == GLFW_PRESS)
-				angle = anamorphicAngle;
+				rotAngle = anamorphicAngle;
 			break;
 		case GLFW_KEY_ENTER: // Apply projection to current angle
 			if (action == GLFW_PRESS)
-				anamorphicAngle = angle;
+				anamorphicAngle = rotAngle;
 			break;
 		case GLFW_KEY_D: // Toggle debug mode
 			if (action == GLFW_PRESS)
@@ -489,8 +559,16 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 			break;
 		case GLFW_KEY_C: // Toggle calibration mode
 			if (action == GLFW_PRESS)
-				calibrate = !calibrate;
+				calibrate = (calibrate + 1) % 3;
 			break;
+	}
+}
+
+void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
+	if (yoffset > 0.0) {
+		radius *= powf(zoomStep, (float)yoffset);
+	} else if (yoffset < 0.0) {
+		radius /= powf(zoomStep, -(float)yoffset);
 	}
 }
 
@@ -505,6 +583,7 @@ void initOpenGL() {
 	window = glfwCreateWindow(PWIDTH, PHEIGHT, "Video Anamorphosis", monitor, NULL); // glfwGetPrimaryMonitor()
 	glfwMakeContextCurrent(window);
 	glfwSetKeyCallback(window, keyCallback);
+	glfwSetScrollCallback(window, scrollCallback);
 	// Init GLEW
 	glewInit();
 
@@ -615,19 +694,17 @@ void update(float dt) {
 	int angleDir = 0;
 	if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) angleDir += 1;
 	if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) angleDir -= 1;
-	if (angleDir != 0) angle += angleDir * speed;
+	if (angleDir != 0) rotAngle += angleDir * rotSpeed * dt;
 
 	int fovDir = 0;
 	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) fovDir += 1;
 	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) fovDir -= 1;
-	if (fovDir != 0) anamorphicFovY += fovDir * speed;
+	if (fovDir != 0) anamorphicFovY += fovDir * rotSpeed * dt;
 	
-	glm::vec3 eye = circlePos(angle);
-	viewMat = glm::lookAt(
-		eye,
-		glm::vec3(0.0f, 0.0f, -radius),
-		glm::vec3(0.0f, eye.z > -radius ? 1.0f : -1.0f, 0.0f)
-	);
+	glm::vec3 eye = circlePos(rotAngle);
+	glm::vec3 center(0.0f, 0.0f, -radius);
+	glm::vec3 up = glm::cross(glm::vec3(1.0f, 0.0f, 0.0f), center - eye);
+	viewMat = glm::lookAt(eye, center, up);
 	pvmMat = projMat * viewMat;
 }
 
