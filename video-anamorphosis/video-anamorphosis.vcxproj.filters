@@ -29,5 +29,8 @@
     <ClInclude Include="approx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="video.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
