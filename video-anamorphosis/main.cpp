@@ -32,7 +32,7 @@
 #include "bmp.h"
 
 #define IMAGE_PATH "image.jpg"
-#define VIDEO_PATH "video2.mp4"
+#define VIDEO_PATH "video.mp4"
 
 #define WIDTH 1600 // Window res
 #define HEIGHT 1200
@@ -53,6 +53,7 @@ constexpr float projFovY = 28.07248694f; // 28.61110369f;
 // Data
 uint8_t* pixels;
 uint16_t* depths;
+int* pixelMap;
 
 // OpenGL variables
 GLFWwindow* window = nullptr;
@@ -74,7 +75,7 @@ CameraSpacePoint depth2xyz[DWIDTH * DHEIGHT];
 float depthFovX = 0, depthFovY = 0;
 
 // Anamorphosis
-uint8_t *image = nullptr;
+uint8_t *imageData = nullptr;
 int imageWidth, imageHeight;
 float anamorphicAngle = 60.0f;
 float anamorphicFovY = 10.0f;
@@ -91,7 +92,6 @@ bool approxMissing = false;
 int calibrate = 0;
 bool record = true;
 bool kinectMap = true;
-bool pointMode = false;
 bool video = true;
 
 bool saveObject = false;
@@ -101,7 +101,26 @@ inline float RAD(const float deg) { return deg * ((float)M_PI / 180.0f); } // De
 inline float DEG(const float rad) { return rad * (180.0f / (float)M_PI); } // Radians to degrees
 inline int SAMPLE_WIDTH() { return video ? videoWidth : imageWidth; }
 inline int SAMPLE_HEIGHT() { return video ? videoHeight : imageHeight; }
-inline uint8_t SAMPLE_DATA(int x, int y, int off) { return video ? videoData[4 * (y * videoWidth + x) + off] : image[3 * (y * imageWidth + x) + off]; }
+inline uint8_t SAMPLE_DATA(int x, int y, int off) { return video ? videoData[4 * (y * videoWidth + x) + off] : imageData[3 * (y * imageWidth + x) + off]; }
+inline glm::vec3 SAMPLE_AVG(float sx, float sy) {
+	if (sx < 0.0f || sx > SAMPLE_WIDTH() - 1.0f || sy < 0 || sy > SAMPLE_HEIGHT() - 1.0f)
+		return glm::vec3(0.0f, 0.0f, 0.0f);
+
+	int xUp = (int)ceilf(sx);
+	int xDown = (int)sx;
+	int yUp = (int)ceilf(sy);
+	int yDown = (int)sy;
+
+	glm::vec3 p00(SAMPLE_DATA(xDown, yDown, 0), SAMPLE_DATA(xDown, yDown, 1), SAMPLE_DATA(xDown, yDown, 2));
+	glm::vec3 p01(SAMPLE_DATA(xUp, yDown, 0), SAMPLE_DATA(xUp, yDown, 1), SAMPLE_DATA(xUp, yDown, 2));
+	glm::vec3 p10(SAMPLE_DATA(xDown, yUp, 0), SAMPLE_DATA(xDown, yUp, 1), SAMPLE_DATA(xDown, yUp, 2));
+	glm::vec3 p11(SAMPLE_DATA(xUp, yUp, 0), SAMPLE_DATA(xUp, yUp, 1), SAMPLE_DATA(xUp, yUp, 2));
+
+	float wx = sx - (float)xDown;
+	float wy = sy - (float)yDown;
+
+	return (p00 * (2.0f - wx - wy) + p01 * (1.0f + wx - wy) + p10 * (1.0f - wx + wy) + p11 * (wx + wy)) * 0.25f;
+}
 
 glm::vec3 circlePos(float angleDeg) {
 	float angleRad = RAD(angleDeg);
@@ -203,28 +222,6 @@ void processDepthData() {
 		myDepthTo3D();
 	mapper->MapDepthFrameToColorSpace(DWIDTH * DHEIGHT, depths, DWIDTH * DHEIGHT, depth2rgb);
 
-	/*for (int i = 0; i < 100; ++i) {
-		if (depths[i] != 0) {
-			glm::vec3 pt = glm::vec3(depth2xyz[i].X, depth2xyz[i].Y, depth2xyz[i].Z);
-			pt /= pt.z;
-			float rx = ((float)(i % DWIDTH) / (DWIDTH - 1.0f) - 0.5f) * 2.0f;
-			float ry = (0.5f - (float)(i / DWIDTH) / (DHEIGHT - 1.0f)) * 2.0f;
-
-			float x = pt.x / rx;
-			float y = pt.y / ry;
-
-			float xPhi = acosf(1 / sqrtf(x * x + 1));
-			float yPhi = acosf(1 / sqrtf(y * y + 1));
-
-			xPhi = 2.0f * atanf(x) * 180.0f / M_PI;
-			yPhi = 2.0f * atanf(y) * 180.0f / M_PI;
-
-			//std::cout << pt.x << " " << rx << ", " << pt.y << " " << ry << std::endl;
-			std::cout << xPhi << " " << yPhi << ", " << depthFovX << " " << depthFovY << std::endl;
-			break;
-		}
-	}*/
-
 	glBindBuffer(GL_ARRAY_BUFFER, vboDepth);
 	GLfloat* vboDepthPtr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	if (vboDepthPtr) {
@@ -291,126 +288,6 @@ void processDepthData() {
 	}
 }
 
-void getPixelsFromPoints() {
-	// Clear pixels
-	for (int i = 0; i < PWIDTH * PHEIGHT * 3; ++i)
-		pixels[i] = 0;
-
-	float uLen = tanf(RAD(projFovX * 0.5f));
-	float vLen = tanf(RAD(projFovY * 0.5f));
-
-	glm::vec3 obsPos = circlePos(anamorphicAngle);
-	glm::vec3 obsTarget(0.0f, 0.0f, -radius);
-	glm::vec3 obsDir = glm::normalize(obsTarget - obsPos);
-	//glm::vec3 projUp(0.0f, 1.0f, 0.0f);
-	//glm::vec3 projRight = glm::normalize(glm::cross(projDir, projUp)); // Should already be normal TODO REMOVE
-	glm::vec3 obsRight(1.0f, 0.0f, 0.0f);
-	glm::vec3 obsUp = glm::normalize(glm::cross(obsRight, obsDir));
-
-	float ratio = (float)SAMPLE_WIDTH() / (float)SAMPLE_HEIGHT();
-	float vMax = tanf(anamorphicFovY * (float)M_PI / 360.0f);
-	float uMax = vMax * ratio;
-
-	for (int i = 0; i < DWIDTH * DHEIGHT; ++i) {
-		glm::vec3 projPos(0.0f, -0.01f, 0.0f);
-		glm::vec3 projDir = glm::vec3(depth2xyz[i].X, depth2xyz[i].Y, depth2xyz[i].Z) - projPos;
-		projDir /= projDir.z;
-
-		float u = projDir.x / uLen;
-		float v = projDir.y / vLen;
-
-		int px = (int)roundf((u + 1.0f) * 0.5f * (PWIDTH - 1.0f));
-		int py = (int)roundf((1.0f - v) * 0.5f * (PHEIGHT - 1.0f));
-
-		if (!(px >= 0 && px < PWIDTH && py >= 0 && py < PHEIGHT))
-			continue;
-
-		int pIdx = 3 * (py * PWIDTH + px);
-		//int pIdx = 3 * ((py + 1) * PWIDTH - 1 - px);
-		for (int i = 0; i < 3; ++i)
-			pixels[pIdx + i] = 0;
-
-		float x = 2.0f * (float)px / (PWIDTH - 1.0f) - 1.0f;
-		float y = 1.0f - 2.0f * (float)py / (PHEIGHT - 1.0f);
-
-		x = x * tanf(RAD(projFovX * 0.5f)) / tanf(RAD(depthFovX * 0.5f));
-		y = y * tanf(RAD(projFovY * 0.5f)) / tanf(RAD(depthFovY * 0.5f));
-
-		x = (x + 1.0f) * 0.5f * (DWIDTH - 1.0f);
-		y = (1.0f - y) * 0.5f * (DHEIGHT - 1.0f);
-
-		if (x >= 0.0f && x < DWIDTH - 1.0f && y >= 0.0f && y <= DHEIGHT - 1.0f) {
-			int dx = (int)x;
-			int dy = (int)y;
-
-			int xUp = (int)ceilf(x);
-			int xDown = (int)x;
-			int yUp = (int)ceilf(y);
-			int yDown = (int)y;
-
-			CameraSpacePoint csp00 = depth2xyz[yDown * DWIDTH + xDown];
-			CameraSpacePoint csp01 = depth2xyz[yDown * DWIDTH + xUp];
-			CameraSpacePoint csp10 = depth2xyz[yUp * DWIDTH + xDown];
-			CameraSpacePoint csp11 = depth2xyz[yUp * DWIDTH + xUp];
-
-			glm::vec3 p00(csp00.X, csp00.Y, csp00.Z);
-			glm::vec3 p01(csp01.X, csp01.Y, csp01.Z);
-			glm::vec3 p10(csp10.X, csp10.Y, csp10.Z);
-			glm::vec3 p11(csp11.X, csp11.Y, csp11.Z);
-
-			float wx = x - (float)xDown;
-			float wy = y - (float)yDown;
-
-			glm::vec3 point = (p00 * (2.0f - wx - wy) + p01 * (1.0f + wx - wy) + p10 * (1.0f - wx + wy) + p11 * (wx + wy)) * 0.25f;
-
-			//point.Y += 0.08f; // TODO: Shift to projector
-
-			glm::vec3 rayDir = point - obsPos;
-
-			float t = glm::dot(obsDir, obsDir) / glm::dot(obsDir, rayDir);
-			glm::vec3 uv = t * rayDir - obsDir;
-			float u = glm::dot(uv, obsRight);
-			float v = glm::dot(uv, -obsUp);
-
-			int x = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(SAMPLE_WIDTH() - 1));
-			int y = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(SAMPLE_HEIGHT() - 1));
-
-			int idxs[] = {
-				3 * ((py)*PWIDTH - 1 - px),
-				3 * ((py)*PWIDTH - px),
-				3 * ((py)*PWIDTH + 1 - px),
-				3 * ((py + 1) * PWIDTH - 1 - px),
-				3 * ((py + 1) * PWIDTH - px),
-				3 * ((py + 1) * PWIDTH + 1 - px),
-				3 * ((py + 2) * PWIDTH - 1 - px),
-				3 * ((py + 2) * PWIDTH - px),
-				3 * ((py + 2) * PWIDTH + 1 - px)
-			};
-
-			for (int k = 0; k < 9; ++k) {
-				if (idxs[k] < 0 || idxs[k] >= PWIDTH * PHEIGHT * 3) continue;
-				if (x >= 0 && x < imageWidth && y >= 0 && y < imageHeight) {
-					for (int j = 0; j < 3; ++j)
-						pixels[idxs[k] + j] = SAMPLE_DATA(x, y, j);
-				}
-				else {
-					for (int j = 0; j < 3; ++j)
-						pixels[idxs[k] + j] = 0;
-				}
-			}
-
-			/*if (x >= 0 && x < imageWidth && y >= 0 && y < imageHeight) {
-				int idx = (y * imageWidth + x) * 3;
-				for (int j = 0; j < 3; ++j)
-					pixels[pIdx + j] = image[idx + j];
-			} else {
-				for (int j = 0; j < 3; ++j)
-					pixels[pIdx + j] = 0;
-			}*/
-		}
-	}
-}
-
 void getPixelsThread(int offset, glm::vec3 obsPos, glm::vec3 obsDir, glm::vec3 obsRight, glm::vec3 obsUp, float uMax, float vMax) {
 	for (int py = offset; py < PHEIGHT; py += NUM_THREADS) {
 		for (int px = 0; px < PWIDTH; ++px) {
@@ -429,9 +306,6 @@ void getPixelsThread(int offset, glm::vec3 obsPos, glm::vec3 obsDir, glm::vec3 o
 			y = (1.0f - y) * 0.5f * (DHEIGHT - 1.0f);
 
 			if (x >= 0.0f && x < DWIDTH - 1.0f && y >= 0.0f && y <= DHEIGHT - 1.0f) {
-				int dx = (int)x;
-				int dy = (int)y;
-
 				int xUp = (int)ceilf(x);
 				int xDown = (int)x;
 				int yUp = (int)ceilf(y);
@@ -452,8 +326,6 @@ void getPixelsThread(int offset, glm::vec3 obsPos, glm::vec3 obsDir, glm::vec3 o
 
 				glm::vec3 point = (p00 * (2.0f - wx - wy) + p01 * (1.0f + wx - wy) + p10 * (1.0f - wx + wy) + p11 * (wx + wy)) * 0.25f;
 
-				//point.Y += 0.08f; // TODO: Shift to projector
-
 				glm::vec3 rayDir = point - obsPos;
 
 				float t = glm::dot(obsDir, obsDir) / glm::dot(obsDir, rayDir);
@@ -461,18 +333,20 @@ void getPixelsThread(int offset, glm::vec3 obsPos, glm::vec3 obsDir, glm::vec3 o
 				float u = glm::dot(uv, obsRight);
 				float v = glm::dot(uv, -obsUp);
 
-				int x = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(SAMPLE_WIDTH() - 1));
-				int y = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(SAMPLE_HEIGHT() - 1));
+				int sx = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(SAMPLE_WIDTH() - 1));
+				int sy = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(SAMPLE_HEIGHT() - 1));
 
-				if (x >= 0 && x < SAMPLE_WIDTH() && y >= 0 && y < SAMPLE_HEIGHT()) {
+				pixelMap[2 * (py * PWIDTH + px)] = sx;
+				pixelMap[2 * (py * PWIDTH + px) + 1] = sy;
+
+				if (sx >= 0 && sx <= SAMPLE_WIDTH() - 1 && sy >= 0 && sy <= SAMPLE_HEIGHT() - 1) {
 					for (int j = 0; j < 3; ++j)
-						pixels[pIdx + j] = SAMPLE_DATA(x, y, j);
-					//*ptr++ = image[idx + j];
-				} else {
-					for (int j = 0; j < 3; ++j)
-						pixels[pIdx + j] = 0;
-					//*ptr++ *= 0;
+						pixels[pIdx + j] = SAMPLE_DATA(sx, sy, j);
 				}
+				
+			} else {
+				pixelMap[2 * (py * PWIDTH + px)] = -1;
+				pixelMap[2 * (py * PWIDTH + px) + 1] = -1;
 			}
 		}
 	}
@@ -563,6 +437,29 @@ void getPixels() {
 	}*/
 }
 
+void mapPixelsThread(int offset) {
+	for (int y = offset; y < PHEIGHT; y += NUM_THREADS) {
+		for (int x = 0; x < PWIDTH; ++x) {
+			int sx = (int)pixelMap[2 * (y * PWIDTH + x)];
+			int sy = (int)pixelMap[2 * (y * PWIDTH + x) + 1];
+			if (!(sx >= 0 && sx <= SAMPLE_WIDTH() - 1 && sy >= 0 && sy <= SAMPLE_HEIGHT() - 1))
+				continue;
+
+			int idx = sy * SAMPLE_WIDTH() + sx;
+			for (int j = 0; j < 3; ++j)
+				pixels[3 * ((y + 1) * PWIDTH - 1 - x) + j] = SAMPLE_DATA(sx, sy, j);
+		}
+	}
+}
+
+void mapPixels() {
+	std::thread threads[NUM_THREADS];
+	for (int i = 0; i < NUM_THREADS; ++i)
+		threads[i] = std::thread(mapPixelsThread, i);
+	for (int i = 0; i < NUM_THREADS; ++i)
+		threads[i].join();
+}
+
 void processColorData(GLfloat* dest) {
 	GLfloat* ptr = dest;
 	for (int i = 0; i < DWIDTH * DHEIGHT; ++i) {
@@ -606,27 +503,58 @@ void processColorData(GLfloat* dest) {
 	}
 }
 
-void processAnamorphicData(GLfloat* dest) {
-	glm::vec3 projPos = circlePos(anamorphicAngle);
-	glm::vec3 projTarget(0.0f, 0.0f, -radius);
-	glm::vec3 projDir = glm::normalize(projTarget - projPos);
+void getAnamorphicPointsThread(GLfloat* dest, int offset, glm::vec3 obsPos, glm::vec3 obsDir, glm::vec3 obsRight, glm::vec3 obsUp, float uMax, float vMax) {
+	dest += offset * 3;
+	for (int i = offset; i < DWIDTH * DHEIGHT; i += NUM_THREADS) {
+		CameraSpacePoint point = depth2xyz[i];
+		glm::vec3 rayDir = glm::vec3(point.X, point.Y, point.Z) - obsPos;
+
+		float t = glm::dot(obsDir, obsDir) / glm::dot(obsDir, rayDir);
+		glm::vec3 uv = t * rayDir - obsDir;
+		float u = glm::dot(uv, obsRight);
+		float v = glm::dot(uv, -obsUp);
+
+		int x = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(SAMPLE_WIDTH() - 1));
+		int y = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(SAMPLE_HEIGHT() - 1));
+
+		if (x >= 0 && x < SAMPLE_WIDTH() && y >= 0 && y < SAMPLE_HEIGHT()) {
+			for (int j = 0; j < 3; ++j)
+				dest[j] = (float)SAMPLE_DATA(x, y, j) / 255.0f;
+		} else {
+			for (int j = 0; j < 3; ++j)
+				dest[j] *= 0.4f;
+		}
+		dest += NUM_THREADS * 3;
+	}
+}
+
+void getAnamorphicPoints(GLfloat* dest) {
+	glm::vec3 obsPos = circlePos(anamorphicAngle);
+	glm::vec3 obsTarget(0.0f, 0.0f, -radius);
+	glm::vec3 obsDir = glm::normalize(obsTarget - obsPos);
 	//glm::vec3 projUp(0.0f, 1.0f, 0.0f);
 	//glm::vec3 projRight = glm::normalize(glm::cross(projDir, projUp)); // Should already be normal TODO REMOVE
-	glm::vec3 projRight(1.0f, 0.0f, 0.0f);
-	glm::vec3 projUp = glm::normalize(glm::cross(projRight, projDir));
+	glm::vec3 obsRight(1.0f, 0.0f, 0.0f);
+	glm::vec3 obsUp = glm::normalize(glm::cross(obsRight, obsDir));
 
 	float ratio = (float)SAMPLE_WIDTH() / (float)SAMPLE_HEIGHT();
 	float vMax = tanf(RAD(anamorphicFovY * 0.5f));
 	float uMax = vMax * ratio;
 
-	for (int i = 0; i < DWIDTH * DHEIGHT; ++i) {
-		CameraSpacePoint point = depth2xyz[i];
-		glm::vec3 rayDir = glm::vec3(point.X, point.Y, point.Z) - projPos;
+	std::thread threads[NUM_THREADS];
+	for (int i = 0; i < NUM_THREADS; ++i)
+		threads[i] = std::thread(getAnamorphicPointsThread, dest, i, obsPos, obsDir, obsRight, obsUp, uMax, vMax);
+	for (int i = 0; i < NUM_THREADS; ++i)
+		threads[i].join();
 
-		float t = glm::dot(projDir, projDir) / glm::dot(projDir, rayDir);
-		glm::vec3 uv =  t * rayDir - projDir;
-		float u = glm::dot(uv, projRight);
-		float v = glm::dot(uv, -projUp);
+	/*for (int i = 0; i < DWIDTH * DHEIGHT; ++i) {
+		CameraSpacePoint point = depth2xyz[i];
+		glm::vec3 rayDir = glm::vec3(point.X, point.Y, point.Z) - obsPos;
+
+		float t = glm::dot(obsDir, obsDir) / glm::dot(obsDir, rayDir);
+		glm::vec3 uv =  t * rayDir - obsDir;
+		float u = glm::dot(uv, obsRight);
+		float v = glm::dot(uv, -obsUp);
 
 		int x = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(SAMPLE_WIDTH()-1));
 		int y = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(SAMPLE_HEIGHT()-1));
@@ -639,7 +567,7 @@ void processAnamorphicData(GLfloat* dest) {
 				*dest++ *= 0.4f;
 				//*dest++ = 0.0f;
 		}
-	}
+	}*/
 }
 
 void getKinectData() {
@@ -653,8 +581,7 @@ void getKinectData() {
 	if (depthUpdate) {
 		processDepthData();
 		if (!debug) {
-			if (pointMode) getPixelsFromPoints();
-			else getPixels();
+			getPixels();
 			glBindTexture(GL_TEXTURE_2D, texPix);
 			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PWIDTH, PHEIGHT, GL_RGB, GL_UNSIGNED_BYTE, pixels);
 		}
@@ -667,7 +594,7 @@ void getKinectData() {
 		if (colorUpdate && debug)
 			processColorData(ptr);
 		if (anamorphosis) // Map anamorphic image to points
-			processAnamorphicData(ptr);
+			getAnamorphicPoints(ptr);
 	}
 	glUnmapBuffer(GL_ARRAY_BUFFER);
 
@@ -719,10 +646,6 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 		case GLFW_KEY_K: // Toggle mapping mode
 			if (action == GLFW_PRESS)
 				kinectMap = !kinectMap;
-			break;
-		case GLFW_KEY_P: // Toggle mapping mode
-			if (action == GLFW_PRESS)
-				pointMode = !pointMode;
 			break;
 		case GLFW_KEY_V: // Toggle video mode
 			if (action == GLFW_PRESS)
@@ -856,14 +779,12 @@ void initOpenGL() {
 	glBindVertexArray(0);
 }
 
-void update(float dt) {
-	// Kinect
-	if (record)
-		getKinectData();
-
-	// Video
+void update(float dt) {// Video
 	int64_t pts;
 	if (video) {
+		if (!record) {
+			mapPixels();
+		}
 		if (!getVideoFrame(&videoState, videoData, &pts)) {
 			printf("Couldn't load video frame\n");
 		} else {
@@ -871,6 +792,10 @@ void update(float dt) {
 			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, PWIDTH, PHEIGHT, GL_RGB, GL_UNSIGNED_BYTE, pixels);
 		}
 	}
+
+	// Kinect
+	if (record)
+		getKinectData();
 
 	// Rotation
 	int angleDir = 0;
@@ -904,8 +829,7 @@ void draw() {
 			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 			//glDrawArrays(GL_TRIANGLES, 0, (DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3 * 3 * sizeof(GLfloat));
 			glDrawArrays(GL_TRIANGLES, 0, numTri * 3 * sizeof(GLfloat));
-		}
-		else {
+		} else {
 			// Points
 			glBindVertexArray(vao);
 			glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
@@ -925,17 +849,19 @@ void draw() {
 
 void init() {
 	int n;
-	image = stbi_load(IMAGE_PATH, &imageWidth, &imageHeight, &n, 3);
+	imageData = stbi_load(IMAGE_PATH, &imageWidth, &imageHeight, &n, 3);
 	pixels = new uint8_t[PWIDTH * PHEIGHT * 3];
 	depths = new uint16_t[DWIDTH * DHEIGHT];
 	approxes = new Approx[DWIDTH * DHEIGHT];
+	pixelMap = new int[PWIDTH * PHEIGHT * 2];
 }
 
 void cleanup() {
-	stbi_image_free(image);
+	stbi_image_free(imageData);
 	delete[] pixels;
 	delete[] depths;
 	delete[] approxes;
+	delete[] pixelMap;
 }
 
 int main() {
@@ -961,11 +887,14 @@ int main() {
 	while (!glfwWindowShouldClose(window)) {
 		auto currentFrame = std::chrono::steady_clock::now();
 		float dt = std::chrono::duration<float>(currentFrame - lastFrame).count();
-		if (fpsCounter++ % 100 == 0) {
-			float fps = 100.0f / std::chrono::duration<float>(currentFrame - fpsTimer).count();
+		float fpsDuration = std::chrono::duration<float>(currentFrame - fpsTimer).count();
+		if (fpsDuration > 5.0f) {
+			float fps = fpsCounter / fpsDuration;
+			fpsCounter = 0;
 			fpsTimer = currentFrame;
 			std::cout << fps << std::endl;
 		}
+		++fpsCounter;
 		lastFrame = currentFrame;
 
 		update(dt);
