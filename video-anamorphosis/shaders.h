@@ -1,3 +1,5 @@
+// OpenGL shaders and functions for compiling them
+
 #pragma once
 
 #include <GL/glew.h>

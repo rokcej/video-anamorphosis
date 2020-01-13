@@ -1,3 +1,6 @@
+// Video Anamorphosis
+// Made by Rok Cej
+
 #define _CRT_SECURE_NO_WARNINGS
 
 // Kinect
@@ -29,72 +32,77 @@
 #include "shaders.h"
 #include "approx.h"
 #include "video.h"
-#include "bmp.h"
 
+// File paths
 #define IMAGE_PATH "image.jpg"
-#define VIDEO_PATH "video2.mp4"
-
-#define WIDTH 1600 // Window res
+#define VIDEO_PATH "video.mp4"
+// Window resolution
+#define WIDTH 1600
 #define HEIGHT 1200
-#define DWIDTH 512 // Depth sensor res
+// Depth sensor resolution
+#define DWIDTH 512 
 #define DHEIGHT 424
-#define CWIDTH 1920 // Color camera res
+// Color camera resolution
+#define CWIDTH 1920 
 #define CHEIGHT 1080
-#define PWIDTH 1600 // Projector res
+// Projector resolution
+#define PWIDTH 1600
 #define PHEIGHT 1200
-
+// Number of threads for multithreading, must be >= 1
 #define NUM_THREADS 8
 
-constexpr float projFovX = 36.86989761f; // 37.55606644f;
-constexpr float projFovY = 28.07248694f; // 28.61110369f;
+constexpr float projFovX = 36.86989761f; // 37.55606644f; // Projector horizontal field of view
+constexpr float projFovY = 28.07248694f; // 28.61110369f; // Projector vertical field of view
 
-#define SAFE_RELEASE(ptr) { if (ptr) { (ptr)->Release(); (ptr) = nullptr; } }
+#define SAFE_RELEASE(ptr) { if (ptr) { (ptr)->Release(); (ptr) = nullptr; } } // Kinect release pointer
 
 // Data
-uint8_t* pixels;
-uint16_t* depths;
-int* pixelMap;
+uint8_t* pixels; // Buffer for pixels
+uint16_t* depths; // Buffer for depth data
+int* pixelMap; // Screen pixels mapped to image/video pixels
 
 // OpenGL variables
-GLFWwindow* window = nullptr;
+GLFWwindow* window = nullptr; // Window
 GLuint prog, progTex; // Shader program
-GLuint vao, vboDepth, vboColor;
-GLuint vaoTri, vboTriPos, vboTriColor;
-GLuint numTri = 0;
-GLuint vaoPix, texPix, vboPix, eboTex;
-glm::mat4 viewMat, projMat, pvmMat;
+GLuint vao, vboDepth, vboColor; // Point cloud objects
+GLuint vaoTri, vboTriPos, vboTriColor, numTri = 0; // Wireframe objects
+GLuint vaoPix, texPix, vboPix, eboTex; // Pixel data objects
+glm::mat4 viewMat, projMat, pvmMat; // Transformation matrices
 
 // Kinect variables
 IKinectSensor *sensor = nullptr; // Kinect sensor
 IMultiSourceFrameReader *reader = nullptr; // Kinect depth data reader
-ICoordinateMapper *mapper = nullptr;
+ICoordinateMapper *mapper = nullptr; // Kinect coordinate mapper
 
-uint8_t rgbaBuf[CWIDTH * CHEIGHT * 4];
-ColorSpacePoint depth2rgb[DWIDTH * DHEIGHT];
-CameraSpacePoint depth2xyz[DWIDTH * DHEIGHT];
-float depthFovX = 0, depthFovY = 0;
+uint8_t rgbaBuf[CWIDTH * CHEIGHT * 4]; // Kinect raw camera pixels
+ColorSpacePoint depth2rgb[DWIDTH * DHEIGHT]; // Kinect raw camera pixels mapped to depth points
+CameraSpacePoint depth2xyz[DWIDTH * DHEIGHT]; // Kinect depth points mapped to 3D
+float depthFovX = 0, depthFovY = 0; // Kinect field of view
 
 // Anamorphosis
-uint8_t *imageData = nullptr;
-int imageWidth, imageHeight;
-float anamorphicAngle = 60.0f;
-float anamorphicFovY = 10.0f;
-float radius = 1.2f; // Meters
+uint8_t *imageData = nullptr; // Raw image data
+int imageWidth, imageHeight; // Image parameters
+float anamorphicAngle = 60.0f; // Vertical angle for anamorphosis
+float anamorphicFovY = 10.0f; // Size of anamorphic image/video
+float radius = 1.2f; // Anamorphic radius in meters
 
 // Interaction
-float rotAngle = 0.0f; // Rotation angle
+float rotAngleY = 0.0f; // Rotation angle in debug mode
+float rotPosX = 0.0f; // Horizontal position in debug mode
 float rotSpeed = 30.0f; // Rotation speed
-float zoomStep = 1.02f;
-bool anamorphosis = false;
-bool debug = false;
-bool wireframe = false;
-bool approxMissing = false;
-int calibrate = 0;
-bool record = true;
-bool kinectMap = true;
-bool video = true;
+float moveSpeed = 0.5f; // Movement speed
+float zoomStep = 1.15f; // Radius changing speed
 
-bool saveObject = false;
+// Flags
+bool anamorphosis = false; // Turns on point cloud anamorphosis
+bool debug = false; // Turns on debug mode
+bool wireframe = false; // Turns on wireframe mode
+bool approxMissing = false; // Turns on misisng point approximation
+int calibrate = 0; // Cycles through calibration modes
+bool colorOverlay = false; // Projects colour data back onto objects
+bool record = true; // Turns on depth data recording
+bool kinectMap = true; // Uses default kinect point mapper
+bool video = true; // Switches between video and image anamorphosis
 
 inline int DI(const int x, const int y) { return y * DWIDTH + x; } // Depth index
 inline float RAD(const float deg) { return deg * ((float)M_PI / 180.0f); } // Degrees to radians
@@ -121,11 +129,9 @@ inline glm::vec3 SAMPLE_AVG(float sx, float sy) {
 
 	return (p00 * (2.0f - wx - wy) + p01 * (1.0f + wx - wy) + p10 * (1.0f - wx + wy) + p11 * (wx + wy)) * 0.25f;
 }
-
-glm::vec3 circlePos(float angleDeg) {
-	float angleRad = RAD(angleDeg);
-	return glm::vec3(0.0f, radius * sinf(angleRad), -radius * (1.0f - cosf(angleRad)));
-	//return glm::vec3(radius * sinf(angleRad), 0.0f, -radius * (1.0f - cosf(angleRad)));
+inline glm::vec3 circlePos(float angleDegY) {
+	float angleRadY = RAD(angleDegY);
+	return glm::vec3(0.0f, radius * sinf(angleRadY), -radius * (1.0f - cosf(angleRadY)));
 }
 
 bool initKinect() {
@@ -139,7 +145,7 @@ bool initKinect() {
 		&reader
 	);
 
-	return reader; // TODO
+	return reader;
 }
 
 void cleanupKinect() {
@@ -227,7 +233,6 @@ void processDepthData() {
 	if (vboDepthPtr) {
 		for (unsigned int i = 0; i < DWIDTH * DHEIGHT; i++) {
 			depth2xyz[i].Z *= -1.f;
-			//depth2xyz[i].X *= -1.f;
 			*vboDepthPtr++ = depth2xyz[i].X;
 			*vboDepthPtr++ = depth2xyz[i].Y;
 			*vboDepthPtr++ = depth2xyz[i].Z;
@@ -265,24 +270,6 @@ void processDepthData() {
 					}
 				}
 			}
-			if (saveObject) {
-				std::ofstream file;
-				file.open("object.obj");
-				ptr = vboTriPosPtr;
-				for (unsigned int i = 0; i < numTri * 3; ++i) {
-					file << "v " << *ptr++;
-					file << " " << *ptr++;
-					file << " " << *ptr++ << std::endl;
-				}
-				int ctr = 1;
-				for (unsigned int i = 0; i < numTri; ++i) {
-					file << "f " << ctr++;
-					file << " " << ctr++;
-					file << " " << ctr++ << std::endl;
-				}
-				file.close();
-				saveObject = false;
-			}
 		}
 		glUnmapBuffer(GL_ARRAY_BUFFER);
 	}
@@ -305,45 +292,57 @@ void getPixelsThread(int offset, glm::vec3 obsPos, glm::vec3 obsDir, glm::vec3 o
 			x = (x + 1.0f) * 0.5f * (DWIDTH - 1.0f);
 			y = (1.0f - y) * 0.5f * (DHEIGHT - 1.0f);
 
-			if (x >= 0.0f && x < DWIDTH - 1.0f && y >= 0.0f && y <= DHEIGHT - 1.0f) {
-				int xUp = (int)ceilf(x);
-				int xDown = (int)x;
-				int yUp = (int)ceilf(y);
-				int yDown = (int)y;
+			if (x >= 0.0f && x <= DWIDTH - 1.0f && y >= 0.0f && y <= DHEIGHT - 1.0f) {
+				if (!colorOverlay) {
+					int xUp = (int)ceilf(x);
+					int xDown = (int)x;
+					int yUp = (int)ceilf(y);
+					int yDown = (int)y;
 
-				CameraSpacePoint csp00 = depth2xyz[yDown * DWIDTH + xDown];
-				CameraSpacePoint csp01 = depth2xyz[yDown * DWIDTH + xUp];
-				CameraSpacePoint csp10 = depth2xyz[yUp * DWIDTH + xDown];
-				CameraSpacePoint csp11 = depth2xyz[yUp * DWIDTH + xUp];
+					CameraSpacePoint csp00 = depth2xyz[yDown * DWIDTH + xDown];
+					CameraSpacePoint csp01 = depth2xyz[yDown * DWIDTH + xUp];
+					CameraSpacePoint csp10 = depth2xyz[yUp * DWIDTH + xDown];
+					CameraSpacePoint csp11 = depth2xyz[yUp * DWIDTH + xUp];
 
-				glm::vec3 p00(csp00.X, csp00.Y, csp00.Z);
-				glm::vec3 p01(csp01.X, csp01.Y, csp01.Z);
-				glm::vec3 p10(csp10.X, csp10.Y, csp10.Z);
-				glm::vec3 p11(csp11.X, csp11.Y, csp11.Z);
+					glm::vec3 p00(csp00.X, csp00.Y, csp00.Z);
+					glm::vec3 p01(csp01.X, csp01.Y, csp01.Z);
+					glm::vec3 p10(csp10.X, csp10.Y, csp10.Z);
+					glm::vec3 p11(csp11.X, csp11.Y, csp11.Z);
 
-				float wx = x - (float)xDown;
-				float wy = y - (float)yDown;
+					float wx = x - (float)xDown;
+					float wy = y - (float)yDown;
 
-				glm::vec3 point = (p00 * (2.0f - wx - wy) + p01 * (1.0f + wx - wy) + p10 * (1.0f - wx + wy) + p11 * (wx + wy)) * 0.25f;
+					glm::vec3 point = (p00 * (2.0f - wx - wy) + p01 * (1.0f + wx - wy) + p10 * (1.0f - wx + wy) + p11 * (wx + wy)) * 0.25f;
 
-				glm::vec3 rayDir = point - obsPos;
+					glm::vec3 rayDir = point - obsPos;
 
-				float t = glm::dot(obsDir, obsDir) / glm::dot(obsDir, rayDir);
-				glm::vec3 uv = t * rayDir - obsDir;
-				float u = glm::dot(uv, obsRight);
-				float v = glm::dot(uv, -obsUp);
+					float t = glm::dot(obsDir, obsDir) / glm::dot(obsDir, rayDir);
+					glm::vec3 uv = t * rayDir - obsDir;
+					float u = glm::dot(uv, obsRight);
+					float v = glm::dot(uv, -obsUp);
 
-				int sx = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(SAMPLE_WIDTH() - 1));
-				int sy = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(SAMPLE_HEIGHT() - 1));
+					int sx = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(SAMPLE_WIDTH() - 1));
+					int sy = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(SAMPLE_HEIGHT() - 1));
 
-				pixelMap[2 * (py * PWIDTH + px)] = sx;
-				pixelMap[2 * (py * PWIDTH + px) + 1] = sy;
+					pixelMap[2 * (py * PWIDTH + px)] = sx;
+					pixelMap[2 * (py * PWIDTH + px) + 1] = sy;
 
-				if (sx >= 0 && sx <= SAMPLE_WIDTH() - 1 && sy >= 0 && sy <= SAMPLE_HEIGHT() - 1) {
-					for (int j = 0; j < 3; ++j)
-						pixels[pIdx + j] = SAMPLE_DATA(sx, sy, j);
+					if (sx >= 0 && sx <= SAMPLE_WIDTH() - 1 && sy >= 0 && sy <= SAMPLE_HEIGHT() - 1) {
+						for (int j = 0; j < 3; ++j)
+							pixels[pIdx + j] = SAMPLE_DATA(sx, sy, j);
+					}
+				} else {
+					ColorSpacePoint p = depth2rgb[(int)roundf(y) * DWIDTH + (int)roundf(x)];
+
+					if (p.X >= 0 && p.X <= CWIDTH - 1 && p.Y >= 0 && p.Y <= CHEIGHT - 1) {
+						for (int j = 0; j < 3; ++j)
+							pixels[pIdx + j] = rgbaBuf[4 * ((int)p.Y * CWIDTH + (int)p.X) + j];
+					} else {
+						int idx = (int)p.X + CWIDTH * (int)p.Y;
+						for (int j = 0; j < 3; ++j)
+							pixels[pIdx + j] = 0;
+					}
 				}
-				
 			} else {
 				pixelMap[2 * (py * PWIDTH + px)] = -1;
 				pixelMap[2 * (py * PWIDTH + px) + 1] = -1;
@@ -356,8 +355,6 @@ void getPixels() {
 	glm::vec3 obsPos = circlePos(anamorphicAngle);
 	glm::vec3 obsTarget(0.0f, 0.0f, -radius);
 	glm::vec3 obsDir = glm::normalize(obsTarget - obsPos);
-	//glm::vec3 projUp(0.0f, 1.0f, 0.0f);
-	//glm::vec3 projRight = glm::normalize(glm::cross(projDir, projUp)); // Should already be normal TODO REMOVE
 	glm::vec3 obsRight(1.0f, 0.0f, 0.0f);
 	glm::vec3 obsUp = glm::normalize(glm::cross(obsRight, obsDir));
 
@@ -445,7 +442,6 @@ void mapPixelsThread(int offset) {
 			if (!(sx >= 0 && sx <= SAMPLE_WIDTH() - 1 && sy >= 0 && sy <= SAMPLE_HEIGHT() - 1))
 				continue;
 
-			int idx = sy * SAMPLE_WIDTH() + sx;
 			for (int j = 0; j < 3; ++j)
 				pixels[3 * ((y + 1) * PWIDTH - 1 - x) + j] = SAMPLE_DATA(sx, sy, j);
 		}
@@ -532,8 +528,6 @@ void getAnamorphicPoints(GLfloat* dest) {
 	glm::vec3 obsPos = circlePos(anamorphicAngle);
 	glm::vec3 obsTarget(0.0f, 0.0f, -radius);
 	glm::vec3 obsDir = glm::normalize(obsTarget - obsPos);
-	//glm::vec3 projUp(0.0f, 1.0f, 0.0f);
-	//glm::vec3 projRight = glm::normalize(glm::cross(projDir, projUp)); // Should already be normal TODO REMOVE
 	glm::vec3 obsRight(1.0f, 0.0f, 0.0f);
 	glm::vec3 obsUp = glm::normalize(glm::cross(obsRight, obsDir));
 
@@ -546,28 +540,6 @@ void getAnamorphicPoints(GLfloat* dest) {
 		threads[i] = std::thread(getAnamorphicPointsThread, dest, i, obsPos, obsDir, obsRight, obsUp, uMax, vMax);
 	for (int i = 0; i < NUM_THREADS; ++i)
 		threads[i].join();
-
-	/*for (int i = 0; i < DWIDTH * DHEIGHT; ++i) {
-		CameraSpacePoint point = depth2xyz[i];
-		glm::vec3 rayDir = glm::vec3(point.X, point.Y, point.Z) - obsPos;
-
-		float t = glm::dot(obsDir, obsDir) / glm::dot(obsDir, rayDir);
-		glm::vec3 uv =  t * rayDir - obsDir;
-		float u = glm::dot(uv, obsRight);
-		float v = glm::dot(uv, -obsUp);
-
-		int x = (int)roundf((u / uMax + 1.0f) * 0.5f * (float)(SAMPLE_WIDTH()-1));
-		int y = (int)roundf((v / vMax + 1.0f) * 0.5f * (float)(SAMPLE_HEIGHT()-1));
-
-		if (x >= 0 && x < SAMPLE_WIDTH() && y >= 0 && y < SAMPLE_HEIGHT()) {
-			for (int j = 0; j < 3; ++j)
-				*dest++ = (float)SAMPLE_DATA(x, y, j) / 255.0f;
-		} else {
-			for (int j = 0; j < 3; ++j)
-				*dest++ *= 0.4f;
-				//*dest++ = 0.0f;
-		}
-	}*/
 }
 
 void getKinectData() {
@@ -590,7 +562,6 @@ void getKinectData() {
 	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
 	GLfloat* ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 	if (ptr) {
-		//if (!anamorphosis) // Map color to points
 		if (colorUpdate && debug)
 			processColorData(ptr);
 		if (anamorphosis) // Map anamorphic image to points
@@ -612,16 +583,20 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 				anamorphosis = !anamorphosis;
 			break;
 		case GLFW_KEY_1: // Projector view
-			if (action == GLFW_PRESS)
-				rotAngle = 0.0f;
+			if (action == GLFW_PRESS) {
+				rotAngleY = 0.0f;
+				rotPosX = 0.0f;
+			}
 			break;
 		case GLFW_KEY_2: // Observer view
-			if (action == GLFW_PRESS)
-				rotAngle = anamorphicAngle;
+			if (action == GLFW_PRESS) {
+				rotAngleY = anamorphicAngle;
+				rotPosX = 0.0f;
+			}
 			break;
 		case GLFW_KEY_ENTER: // Apply projection to current angle
 			if (action == GLFW_PRESS)
-				anamorphicAngle = rotAngle;
+				anamorphicAngle = rotAngleY;
 			break;
 		case GLFW_KEY_D: // Toggle debug mode
 			if (action == GLFW_PRESS)
@@ -651,10 +626,15 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 			if (action == GLFW_PRESS)
 				video = !video;
 			break;
+		case GLFW_KEY_O: // Toggle color overlay
+			if (action == GLFW_PRESS)
+				colorOverlay = !colorOverlay;
+			break;
 	}
 }
 
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
+	// Change radius on scroll
 	if (yoffset > 0.0) {
 		radius *= powf(zoomStep, (float)yoffset);
 	} else if (yoffset < 0.0) {
@@ -780,11 +760,11 @@ void initOpenGL() {
 }
 
 void update(float dt) {// Video
-	int64_t pts;
 	if (video) {
 		if (!record) {
 			mapPixels();
 		}
+		int64_t pts;
 		if (!getVideoFrame(&videoState, videoData, &pts)) {
 			printf("Couldn't load video frame\n");
 		} else {
@@ -801,14 +781,20 @@ void update(float dt) {// Video
 	int angleDir = 0;
 	if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) angleDir += 1;
 	if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) angleDir -= 1;
-	if (angleDir != 0) rotAngle += angleDir * rotSpeed * dt;
+	if (angleDir != 0) rotAngleY += angleDir * rotSpeed * dt;
+
+	angleDir = 0;
+	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) angleDir += 1;
+	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) angleDir -= 1;
+	if (angleDir != 0) rotPosX += angleDir * moveSpeed * dt;
 
 	int fovDir = 0;
-	if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) fovDir += 1;
-	if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) fovDir -= 1;
+	if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) fovDir += 1;
+	if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) fovDir -= 1;
 	if (fovDir != 0) anamorphicFovY += fovDir * dt;
 	
-	glm::vec3 eye = circlePos(rotAngle);
+	glm::vec3 eye = circlePos(rotAngleY);
+	eye.x += rotPosX;
 	glm::vec3 center(0.0f, 0.0f, -radius);
 	glm::vec3 up = glm::cross(glm::vec3(1.0f, 0.0f, 0.0f), center - eye);
 	viewMat = glm::lookAt(eye, center, up);
@@ -827,7 +813,6 @@ void draw() {
 			glBindVertexArray(vaoTri);
 			glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
 			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-			//glDrawArrays(GL_TRIANGLES, 0, (DWIDTH - 1) * (DHEIGHT - 1) * 2 * 3 * 3 * sizeof(GLfloat));
 			glDrawArrays(GL_TRIANGLES, 0, numTri * 3 * sizeof(GLfloat));
 		} else {
 			// Points

@@ -1,3 +1,5 @@
+// Functions for approximating missing depth data
+
 #pragma once
 
 #include <stdint.h>

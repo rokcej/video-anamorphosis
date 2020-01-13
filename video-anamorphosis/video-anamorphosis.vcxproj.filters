@@ -23,9 +23,6 @@
     <ClInclude Include="shaders.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="bmp.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="approx.h">
       <Filter>Header Files</Filter>
     </ClInclude>

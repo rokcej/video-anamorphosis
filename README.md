@@ -1,6 +1,6 @@
 # Video Anamorphosis
 
-The goal of this project is to project a distorted image onto a given surface, that looks perfect when viewed from a specific angle.
+The goal of this project is to project a distorted (anamorphic) image onto a given surface, that looks recognizable when viewed from a specific angle.
 
 ## Dependencies
 
@@ -20,8 +20,10 @@ The goal of this project is to project a distorted image onto a given surface, t
 | R            | Toggle depth recording                               |
 | V            | Switch between video and image mode                  |
 | D            | Toggle debug mode                                    |
-| Up, Down     | [Debug mode] Rotate view                             |
-| Left, Right  | [Debug mode] Resize projection                       |
+| O            | Project colour data back onto objects (calibration)  |
+| Up, Down     | [Debug mode] Rotate view horizontally                |
+| Left, Right  | [Debug mode] Move view vertically                    |
+| Plus, Minus  | [Debug mode] Resize projection                       |
 | Scroll wheel | [Debug mode] Change projection radius                |
 | W            | [Debug mode] Toggle wireframe mode                   |
 | M            | [Debug mode] Toggle missing data approximation       |

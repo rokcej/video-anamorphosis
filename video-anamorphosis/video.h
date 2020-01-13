@@ -1,4 +1,5 @@
 // Thanks to https://github.com/bartjoyce/video-app
+// Fuctions for reading and decoding video files
 
 #pragma once
 
@@ -23,9 +24,9 @@ struct VideoReaderState {
 	SwsContext* sws_scaler_ctx = NULL;
 };
 
-VideoReaderState videoState;
-int videoWidth, videoHeight;
-uint8_t* videoData = nullptr;
+VideoReaderState videoState; // Keeps track of video state
+int videoWidth, videoHeight; // Video size
+uint8_t* videoData = nullptr; // Raw video frame data
 
 bool initVideo(VideoReaderState* state, const char* filename) {
 	// Unpack members of state
