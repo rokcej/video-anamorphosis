@@ -34,3 +34,16 @@ The goal of this project is to project a distorted (anamorphic) image onto a giv
 | 1            | [**Debug mode**] Move camera to projector view           |
 | 2            | [**Debug mode**] Move camera to observer view            |
 | Esc          | Exit                                                     |
+
+## How to use
+
+1. Install dependencies
+2. Connect an Xbox One Kinect and a projector (set as secondary monitor) to your computer
+3. Adjust the following parameters at the top of the `main.cpp` as necessary:
+	* Anamorphic angle, radius and field of view
+	* Image and video file paths
+	* Projector resolution and field of view
+4. Compile and run
+5. Use calibration mode to align kinect and projector
+6. Done!
+

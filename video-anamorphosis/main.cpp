@@ -33,26 +33,41 @@
 #include "approx.h"
 #include "video.h"
 
-// File paths
-#define IMAGE_PATH "image.jpg"
-#define VIDEO_PATH "video.mp4"
-// Window resolution
-#define WIDTH 1600
-#define HEIGHT 1200
-// Depth sensor resolution
-#define DWIDTH 512 
-#define DHEIGHT 424
-// Color camera resolution
-#define CWIDTH 1920 
-#define CHEIGHT 1080
-// Projector resolution
-#define PWIDTH 1600
-#define PHEIGHT 1200
-// Number of threads for multithreading, must be >= 1
-#define NUM_THREADS 8
 
+// =====================================================
+// ==================== ADJUST THIS ====================
+// =====================================================
+// Anamorphosis parameters
+float anamorphicAngle = 60.0f; // Vertical angle for anamorphosis
+float anamorphicFovY = 10.0f; // Size of anamorphic image/video
+float radius = 1.2f; // Anamorphic radius in meters
+
+// File paths (both files are necessary)
+constexpr const char *IMAGE_PATH = "image.jpg";
+constexpr const char *VIDEO_PATH = "video.mp4";
+// Projector resolution
+constexpr int PWIDTH = 1600;
+constexpr int PHEIGHT = 1200;
+// Projector field of view
 constexpr float projFovX = 36.86989761f; // 37.55606644f; // Projector horizontal field of view
 constexpr float projFovY = 28.07248694f; // 28.61110369f; // Projector vertical field of view
+
+// =====================================================
+// =====================================================
+
+
+// Number of threads for multithreading, must be >= 1
+constexpr int NUM_THREADS = 8;
+
+// Window resolution
+constexpr int WIDTH = PWIDTH;
+constexpr int HEIGHT = PHEIGHT;
+// Kinect depth sensor resolution
+constexpr int DWIDTH = 512;
+constexpr int DHEIGHT = 424;
+// Kinect color camera resolution
+constexpr int CWIDTH = 1920;
+constexpr int CHEIGHT = 1080;
 
 #define SAFE_RELEASE(ptr) { if (ptr) { (ptr)->Release(); (ptr) = nullptr; } } // Kinect release pointer
 
@@ -60,6 +75,8 @@ constexpr float projFovY = 28.07248694f; // 28.61110369f; // Projector vertical 
 uint8_t* pixels; // Buffer for pixels
 uint16_t* depths; // Buffer for depth data
 int* pixelMap; // Screen pixels mapped to image/video pixels
+uint8_t* imageData = nullptr; // Raw image data
+int imageWidth, imageHeight; // Image parameters
 
 // OpenGL variables
 GLFWwindow* window = nullptr; // Window
@@ -78,13 +95,6 @@ uint8_t rgbaBuf[CWIDTH * CHEIGHT * 4]; // Kinect raw camera pixels
 ColorSpacePoint depth2rgb[DWIDTH * DHEIGHT]; // Kinect raw camera pixels mapped to depth points
 CameraSpacePoint depth2xyz[DWIDTH * DHEIGHT]; // Kinect depth points mapped to 3D
 float depthFovX = 0, depthFovY = 0; // Kinect field of view
-
-// Anamorphosis
-uint8_t *imageData = nullptr; // Raw image data
-int imageWidth, imageHeight; // Image parameters
-float anamorphicAngle = 60.0f; // Vertical angle for anamorphosis
-float anamorphicFovY = 10.0f; // Size of anamorphic image/video
-float radius = 1.2f; // Anamorphic radius in meters
 
 // Interaction
 float rotAngleY = 0.0f; // Rotation angle in debug mode
