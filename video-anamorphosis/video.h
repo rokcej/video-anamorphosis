@@ -41,7 +41,7 @@ bool initVideo(VideoReaderState* state, const char* filename) {
 	// Open the file using libavformat
 	av_format_ctx = avformat_alloc_context();
 	if (!av_format_ctx) {
-		printf("Couldn't created AVFormatContext\n");
+		printf("Couldn't create AVFormatContext\n");
 		return false;
 	}
 

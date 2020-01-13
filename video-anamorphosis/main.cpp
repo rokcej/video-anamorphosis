@@ -32,7 +32,7 @@
 #include "bmp.h"
 
 #define IMAGE_PATH "image.jpg"
-#define VIDEO_PATH "video.mp4"
+#define VIDEO_PATH "video2.mp4"
 
 #define WIDTH 1600 // Window res
 #define HEIGHT 1200

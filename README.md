@@ -15,20 +15,20 @@ The goal of this project is to project a distorted image onto a given surface, t
 
 ## Controls
 
-| Key          | Function                                |
-|--------------|-----------------------------------------|
-| R            | Toggle depth recording                  |
-| V            | Switch between video and image mode     |
-| D            | Toggle debug mode                       |
-| Up, Down     | Rotate view                             |
-| Left, Right  | Resize projection                       |
-| Scroll wheel | Change projection radius                |
-| W            | Toggle wireframe mode                   |
-| M            | Toggle missing data approximation       |
-| C            | Toggle calibration mode                 |
-| K            | Switch between point mapping modes      |
-| Space        | Toggle between live view and projection |
-| Enter        | Apply projection to current position    |
-| 1            | Move camera to projector view           |
-| 2            | Move camera to observer view            |
-| Esc          | Exit                                    |
+| Key          | Function                                             |
+|--------------|------------------------------------------------------|
+| R            | Toggle depth recording                               |
+| V            | Switch between video and image mode                  |
+| D            | Toggle debug mode                                    |
+| Up, Down     | [Debug mode] Rotate view                             |
+| Left, Right  | [Debug mode] Resize projection                       |
+| Scroll wheel | [Debug mode] Change projection radius                |
+| W            | [Debug mode] Toggle wireframe mode                   |
+| M            | [Debug mode] Toggle missing data approximation       |
+| C            | [Debug mode] Toggle calibration mode                 |
+| K            | [Debug mode] Switch between point mapping modes      |
+| Space        | [Debug mode] Toggle between live view and projection |
+| Enter        | [Debug mode] Apply projection to current position    |
+| 1            | [Debug mode] Move camera to projector view           |
+| 2            | [Debug mode] Move camera to observer view            |
+| Esc          | Exit                                                 |
