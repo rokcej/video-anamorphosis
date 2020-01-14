@@ -17,6 +17,7 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#include<string>
 // GLEW
 #include <GL/glew.h>
 // GLFW
@@ -32,6 +33,7 @@
 #include "shaders.h"
 #include "approx.h"
 #include "video.h"
+#include "bmp.h"
 
 
 // =====================================================
@@ -43,11 +45,11 @@ float anamorphicFovY = 10.0f; // Size of anamorphic image/video
 float radius = 1.2f; // Anamorphic radius in meters
 
 // File paths (both files are necessary)
-constexpr const char *IMAGE_PATH = "image.jpg";
-constexpr const char *VIDEO_PATH = "video.mp4";
+constexpr const char *IMAGE_PATH = "data/image.jpg";
+constexpr const char *VIDEO_PATH = "data/video.mp4";
 // Projector resolution
-constexpr int PWIDTH = 1600;
-constexpr int PHEIGHT = 1200;
+int PWIDTH = 1600;
+int PHEIGHT = 1200;
 // Projector field of view
 constexpr float projFovX = 36.86989761f; // 37.55606644f; // Projector horizontal field of view
 constexpr float projFovY = 28.07248694f; // 28.61110369f; // Projector vertical field of view
@@ -60,8 +62,8 @@ constexpr float projFovY = 28.07248694f; // 28.61110369f; // Projector vertical 
 constexpr int NUM_THREADS = 8;
 
 // Window resolution
-constexpr int WIDTH = PWIDTH;
-constexpr int HEIGHT = PHEIGHT;
+int WIDTH = PWIDTH;
+int HEIGHT = PHEIGHT;
 // Kinect depth sensor resolution
 constexpr int DWIDTH = 512;
 constexpr int DHEIGHT = 424;
@@ -640,6 +642,10 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 			if (action == GLFW_PRESS)
 				colorOverlay = !colorOverlay;
 			break;
+		case GLFW_KEY_S: // Save depth data
+			if (action == GLFW_PRESS)
+				bmpSaveKinectDepth(depths, DWIDTH, DHEIGHT, "depth.bmp");
+			break;
 	}
 }
 
@@ -859,7 +865,13 @@ void cleanup() {
 	delete[] pixelMap;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+	// Program arguments
+	if (argc >= 3) {
+		WIDTH = std::stoi(argv[1]); PWIDTH = WIDTH;
+		HEIGHT = std::stoi(argv[2]); PHEIGHT = HEIGHT;
+	}
+
 	// My init
 	init();
 	// Init OpenGL
@@ -887,7 +899,7 @@ int main() {
 			float fps = fpsCounter / fpsDuration;
 			fpsCounter = 0;
 			fpsTimer = currentFrame;
-			std::cout << fps << std::endl;
+			std::cout << "FPS: " << fps << std::endl;
 		}
 		++fpsCounter;
 		lastFrame = currentFrame;

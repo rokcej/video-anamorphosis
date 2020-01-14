@@ -21,6 +21,7 @@ The goal of this project is to project a distorted (anamorphic) image onto a giv
 | V            | Switch between video and image mode                      |
 | D            | Toggle debug mode                                        |
 | O            | Project colour data back onto objects                    |
+| S            | Save kinect depth data as `depth.bmp`                    |
 | Up, Down     | [**Debug mode**] Rotate view horizontally                |
 | Left, Right  | [**Debug mode**] Move view vertically                    |
 | +, -         | [**Debug mode**] Resize projection                       |

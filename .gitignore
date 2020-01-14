@@ -1,5 +1,5 @@
 include/
-*.mp4
+data/
 depth.bmp
 object.obj
 
