@@ -1,6 +1,8 @@
 # Video Anamorphosis
 
-The goal of this project is to project a distorted (anamorphic) image onto a given surface, that looks recognizable when viewed from a specific angle.
+> Anamorphosis is a distorted projection requiring the viewer to occupy a specific vantage point to view a recognizable image.
+
+The goal of this project is to project an image or video onto any surface in such a way that it looks perfect when viewed from a specific angle.
 
 ## Dependencies
 
@@ -21,7 +23,7 @@ The goal of this project is to project a distorted (anamorphic) image onto a giv
 | V            | Switch between video and image mode                      |
 | D            | Toggle debug mode                                        |
 | O            | Project colour data back onto objects                    |
-| S            | Save kinect depth data as `depth.bmp`                    |
+| S            | Save depth data as `depth.bmp`                           |
 | Up, Down     | [**Debug mode**] Rotate view horizontally                |
 | Left, Right  | [**Debug mode**] Move view vertically                    |
 | +, -         | [**Debug mode**] Resize projection                       |
