@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -59,15 +60,15 @@ void bmpSaveKinectDepth(uint16_t* data, int width, int height, const char* fileN
 	int paddingSize = (4 - (width * 3) % 4) % 4;
 
 	// Get max value
-	uint16_t maxValue = data[0];
-	uint16_t minValue = data[0];
+	uint16_t maxDist = 500; // Minimum kinect distance, 0.5m
+	uint16_t minDist = 65535; // Maximum 16bit value
 	for (int i = 1; i < width * height; ++i) {
-		if (data[i] > maxValue)
-			maxValue = data[i];
-		if (data[i] < minValue)
-			minValue = data[i];
+		if (data[i] > maxDist)
+			maxDist = data[i];
+		else if (data[i] >= 500 && data[i] < minDist)
+			minDist = data[i];
 	}
-	float divisor = maxValue - minValue;
+	float divisor = (float)(maxDist - minDist);
 
 	// Write to file
 	FILE* f = fopen(fileName, "wb");
@@ -75,7 +76,8 @@ void bmpSaveKinectDepth(uint16_t* data, int width, int height, const char* fileN
 	fwrite(infoHeader, 1, INFO_HEADER_SIZE, f);
 	for (int y = height - 1; y >= 0; --y) {
 		for (int x = 0; x < width; ++x) {
-			unsigned char a = (unsigned char)roundf((float)(data[y * width + x] - minValue) * 255.0f / (float)divisor);
+			uint16_t dist = std::max(data[y * width + x], minDist);
+			unsigned char a = (unsigned char)roundf((float)(dist - minDist) * 255.0f / (float)divisor);
 			fwrite(&a, 1, 1, f);
 			fwrite(&a, 1, 1, f);
 			fwrite(&a, 1, 1, f);

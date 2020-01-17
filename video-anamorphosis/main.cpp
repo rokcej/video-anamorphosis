@@ -103,7 +103,7 @@ float rotAngleY = 0.0f; // Rotation angle in debug mode
 float rotPosX = 0.0f; // Horizontal position in debug mode
 float rotSpeed = 30.0f; // Rotation speed
 float moveSpeed = 0.5f; // Movement speed
-float zoomStep = 1.15f; // Radius changing speed
+float zoomStep = 1.01f; // Radius changing speed
 
 // Flags
 bool anamorphosis = false; // Turns on point cloud anamorphosis
@@ -834,7 +834,7 @@ void draw() {
 			// Points
 			glBindVertexArray(vao);
 			glUniformMatrix4fv(glGetUniformLocation(prog, "uPVM"), 1, GL_FALSE, glm::value_ptr(pvmMat));
-			glPointSize((GLfloat)HEIGHT / (GLfloat)DHEIGHT * 1.2f);
+			glPointSize((GLfloat)HEIGHT / (GLfloat)DHEIGHT);
 			glDrawArrays(GL_POINTS, 0, DWIDTH * DHEIGHT * 3 * sizeof(GLfloat));
 		}
 	} else {
