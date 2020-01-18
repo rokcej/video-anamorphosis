@@ -571,15 +571,17 @@ void getKinectData() {
 		}
 	}
 
-	glBindBuffer(GL_ARRAY_BUFFER, vboColor);
-	GLfloat* ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-	if (ptr) {
-		if (colorUpdate && debug)
-			processColorData(ptr);
-		if (anamorphosis) // Map anamorphic image to points
-			getAnamorphicPoints(ptr);
+	if (debug) {
+		glBindBuffer(GL_ARRAY_BUFFER, vboColor);
+		GLfloat* ptr = (GLfloat*)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+		if (ptr) {
+			if (colorUpdate)
+				processColorData(ptr);
+			if (anamorphosis) // Map anamorphic image to points
+				getAnamorphicPoints(ptr);
+		}
+		glUnmapBuffer(GL_ARRAY_BUFFER);
 	}
-	glUnmapBuffer(GL_ARRAY_BUFFER);
 
 	SAFE_RELEASE(frame);
 }
