@@ -4,6 +4,16 @@
 
 The goal of this project is to project an image or video onto any surface in such a way that it looks perfect when viewed from a specific angle.
 
+## Results
+
+The following images show the projector point-of-view (left) and the observer point-of-view (right).
+
+* Virtual anamorphosis on a point cloud
+	![Virtual anamorphosis](docs/virtual_anamorphosis.jpg "Virtual anamorphosis")
+
+* Real-life anamorphosis on a wooden board
+	![Real-life anamorphosis](docs/real-life_anamorphosis.jpg "Real-life anamorphosis")
+
 ## Dependencies
 
 | Dependency | Version | Description             |
