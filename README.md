@@ -6,13 +6,15 @@ The goal of this project is to project an image or video onto any surface in suc
 
 ## Results
 
-The following images show the projector point-of-view (left) and the observer point-of-view (right). Full report is available [here](docs/video-anamorphosis.pdf).  
+The following images show the projector point-of-view (left) and the observer point-of-view (right):  
 
 * Virtual anamorphosis on a point cloud
 	![Virtual anamorphosis](docs/virtual_anamorphosis.jpg "Virtual anamorphosis")
 
 * Real-life anamorphosis on a wooden board
 	![Real-life anamorphosis](docs/real-life_anamorphosis.jpg "Real-life anamorphosis")
+
+Project report is available [here](docs/video-anamorphosis.pdf).
 
 ## Dependencies
 
