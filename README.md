@@ -2,7 +2,7 @@
 
 > Anamorphosis is a distorted projection requiring the viewer to occupy a specific vantage point to view a recognizable image.
 
-The goal of this project is to project an image or video onto any surface in such a way that it looks perfect when viewed from a specific angle.
+The goal of this project is to project an image or video onto any surface in such a way that it looks perfect when viewed from a specific angle. The final report is available [here](docs/video-anamorphosis.pdf).
 
 ## Results
 
