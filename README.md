@@ -2,11 +2,11 @@
 
 > Anamorphosis is a distorted projection requiring the viewer to occupy a specific vantage point to view a recognizable image.
 
-The goal of this project is to project an image or video onto any surface in such a way that it looks perfect when viewed from a specific angle. The final report is available [here](docs/video-anamorphosis.pdf).
+The goal of this project is to project an image or video onto any surface in such a way that it looks perfect when viewed from a specific angle.
 
 ## Results
 
-The following images show the projector point-of-view (left) and the observer point-of-view (right).
+The following images show the projector point-of-view (left) and the observer point-of-view (right). Full report is available [here](docs/video-anamorphosis.pdf).  
 
 * Virtual anamorphosis on a point cloud
 	![Virtual anamorphosis](docs/virtual_anamorphosis.jpg "Virtual anamorphosis")
